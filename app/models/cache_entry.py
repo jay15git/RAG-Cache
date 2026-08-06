@@ -8,7 +8,7 @@ Sandi Metz Principles:
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,18 @@ class CacheEntry(BaseModel):
     )
     hit_count: int = Field(default=0, ge=0, description="Number of cache hits")
     embedding: Optional[list[float]] = Field(None, description="Query embedding vector")
+    namespace: str = Field(default="default", description="Tenant cache namespace")
+    tags: List[str] = Field(default_factory=list)
+    expires_at: Optional[datetime] = None
+    stale_until: Optional[datetime] = None
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at is not None and datetime.utcnow() > self.expires_at
+
+    @property
+    def is_stale(self) -> bool:
+        return self.is_expired and self.stale_until is not None and datetime.utcnow() <= self.stale_until
 
     @property
     def total_tokens(self) -> int:

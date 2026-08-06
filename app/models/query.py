@@ -7,7 +7,7 @@ Sandi Metz Principles:
 - Single responsibility per model
 """
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -50,6 +50,11 @@ class QueryRequest(BaseModel):
         default=True, description="Enable semantic similarity search"
     )
 
+    tenant_id: str = Field(default="default", min_length=1, max_length=128)
+    system_prompt_hash: str = Field(default="", max_length=128)
+    tags: List[str] = Field(default_factory=list, max_length=20)
+    allow_stale: bool = Field(default=False, description="Allow stale-while-revalidate hits")
+
     @field_validator("query")
     @classmethod
     def validate_query(cls, v: str) -> str:
@@ -58,6 +63,19 @@ class QueryRequest(BaseModel):
         if not v:
             raise ValueError("Query cannot be empty")
         return v
+
+    @field_validator("tenant_id")
+    @classmethod
+    def validate_tenant_id(cls, v: str) -> str:
+        value = v.strip()
+        if not value or any(char.isspace() or char in ":{}" for char in value):
+            raise ValueError("Invalid tenant_id")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, values: List[str]) -> List[str]:
+        return [tag.strip().lower() for tag in values if tag.strip()][:20]
 
     def get_provider(self, default: str) -> str:
         """Get provider with fallback to default."""

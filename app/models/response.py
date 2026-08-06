@@ -39,6 +39,10 @@ class CacheInfo(BaseModel):
     similarity_score: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Semantic similarity score"
     )
+    stale: bool = Field(
+        default=False,
+        description="Whether a stale-while-revalidate entry was served",
+    )
 
     @classmethod
     def miss(cls) -> "CacheInfo":
@@ -46,15 +50,25 @@ class CacheInfo(BaseModel):
         return cls(cache_hit=False, cache_type=None, similarity_score=None)
 
     @classmethod
-    def exact_hit(cls) -> "CacheInfo":
+    def exact_hit(cls, stale: bool = False) -> "CacheInfo":
         """Create exact cache hit info."""
-        return cls(cache_hit=True, cache_type="exact", similarity_score=None)
+        return cls(
+            cache_hit=True,
+            cache_type="exact",
+            similarity_score=None,
+            stale=stale,
+        )
 
     @classmethod
-    def semantic_hit(cls, similarity_score: float) -> "CacheInfo":
+    def semantic_hit(
+        cls, similarity_score: float, stale: bool = False
+    ) -> "CacheInfo":
         """Create semantic cache hit info."""
         return cls(
-            cache_hit=True, cache_type="semantic", similarity_score=similarity_score
+            cache_hit=True,
+            cache_type="semantic",
+            similarity_score=similarity_score,
+            stale=stale,
         )
 
 

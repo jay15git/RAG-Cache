@@ -74,6 +74,9 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=70
 
+      - name: Run CachePilot load smoke test
+        run: python scripts/load_test.py --requests 100 --miss-latency-ms 0
+
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
         if: always()

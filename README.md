@@ -1,6 +1,23 @@
-# RAG Cache
+# CachePilot
 
-A high-performance caching layer for Large Language Model (LLM) queries with exact and semantic matching capabilities.
+A multi-tenant semantic caching layer for LLM APIs. CachePilot combines Redis exact matching with Qdrant semantic matching to reduce redundant model calls while keeping cache identity, freshness, and privacy explicit.
+
+## Resume-ready engineering signals
+
+- Tenant-isolated namespaces prevent cross-customer cache leakage.
+- Adaptive query policies tune similarity threshold, TTL, and stale serving by query type.
+- Tenant-scoped invalidation supports tags and prefixes.
+- Privacy-safe audit helpers redact common PII and secrets.
+- Metrics expose hit rate, latency, near misses, false hits, stale hits, and estimated savings.
+- Reproducible benchmark produces measured before/after evidence.
+
+Run the local benchmark:
+
+```bash
+python scripts/load_test.py --requests 2000 --repeat-ratio 0.6 --tenants 3 --output benchmark.json
+```
+
+See [the CachePilot case study](docs/CACHEPILOT_CASE_STUDY.md) for architecture and measurement methodology.
 
 ## 🎯 What is RAG Cache?
 

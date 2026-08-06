@@ -10,9 +10,11 @@ Sandi Metz Principles:
 """
 
 import time
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.cache.redis_cache import RedisCache
+from app.cache.policy import CachePolicy
 from app.config import config
 from app.llm.provider import BaseLLMProvider
 from app.models.cache_entry import CacheEntry
@@ -20,6 +22,8 @@ from app.models.query import QueryRequest
 from app.models.response import CacheInfo, QueryResponse, UsageMetrics
 from app.pipeline.request_context import RequestContextManager
 from app.pipeline.semantic_matcher import SemanticMatch, SemanticMatcher
+from app.monitoring.prometheus import get_metrics
+from app.services.audit_service import AuditService
 from app.utils.hasher import generate_cache_key
 from app.utils.logger import get_logger
 
@@ -38,6 +42,7 @@ class QueryService:
         cache: RedisCache,
         llm_provider: BaseLLMProvider,
         semantic_matcher: Optional[SemanticMatcher] = None,
+        audit_service: Optional[AuditService] = None,
     ):
         """
         Initialize service.
@@ -51,6 +56,7 @@ class QueryService:
         self._llm = llm_provider
         self._semantic = semantic_matcher
         self._enable_semantic = config.enable_semantic_cache and semantic_matcher
+        self._audit = audit_service or AuditService()
 
     async def process(self, request: QueryRequest) -> QueryResponse:
         """
@@ -65,6 +71,8 @@ class QueryService:
             Query response
         """
         start_time = time.time()
+        policy = CachePolicy.for_request(request)
+        model = request.model or config.default_model
 
         # Start request context
         ctx = RequestContextManager.start(query=request.query)
@@ -72,36 +80,63 @@ class QueryService:
         try:
             # Try exact cache if enabled
             if request.use_cache:
-                cached = await self._check_exact_cache(request)
+                cached = await self._check_exact_cache(request, policy, model)
                 if cached:
-                    ctx.mark_cache_checked(hit=True)
-                    return self._build_cached_response(cached, start_time)
+                    if cached.is_stale and not request.allow_stale:
+                        cached = None
+                    else:
+                        ctx.mark_cache_checked(hit=True)
+                        get_metrics().track_cache_decision(
+                            "stale" if cached.is_stale else "exact",
+                            latency_ms=(time.time() - start_time) * 1000,
+                            cost_saved_usd=(cached.total_tokens / 1_000_000) * 0.15,
+                        )
+                        return self._build_cached_response(cached, start_time)
                 ctx.mark_cache_checked(hit=False)
 
             # Try semantic cache if enabled
             if request.use_cache and self._enable_semantic:
-                match = await self._check_semantic_cache(request)
-                if match:
+                match = await self._check_semantic_cache(request, policy)
+                if match and not match.is_expired:
                     ctx.mark_semantic_checked(hit=True)
+                    get_metrics().track_cache_decision(
+                        "semantic",
+                        latency_ms=(time.time() - start_time) * 1000,
+                        cost_saved_usd=0.000075,
+                    )
                     return self._build_semantic_response(match, start_time)
                 ctx.mark_semantic_checked(hit=False)
 
             # Call LLM
             ctx.mark_llm_called()
+            get_metrics().track_cache_decision("miss")
             llm_response = await self._call_llm(request)
 
             # Store in caches
             if request.use_cache:
-                await self._store_in_caches(request, llm_response)
+                await self._store_in_caches(request, llm_response, policy)
 
             # Build response
             return self._build_response(llm_response, start_time)
 
         finally:
+            self._audit.record(
+                {
+                    "request_id": ctx.request_id,
+                    "tenant_id": request.tenant_id,
+                    "query": request.query,
+                    "query_hash": generate_cache_key(request.query, namespace=policy.namespace),
+                    "cache_hit": ctx.cache_hit or ctx.semantic_hit,
+                    "latency_ms": round((time.time() - start_time) * 1000, 2),
+                    "provider": self._llm.get_name(),
+                }
+            )
             # End request context
             RequestContextManager.end()
 
-    async def _check_exact_cache(self, request: QueryRequest) -> Optional[CacheEntry]:
+    async def _check_exact_cache(
+        self, request: QueryRequest, policy, model: str
+    ) -> Optional[CacheEntry]:
         """
         Check exact cache for query.
 
@@ -112,13 +147,21 @@ class QueryService:
             Cache entry if found
         """
         try:
-            return await self._cache.get(request.query)
+            return await self._cache.get(
+                request.query,
+                namespace=policy.namespace,
+                key_context={
+                    "system_prompt_hash": request.system_prompt_hash,
+                    "model": model,
+                    "temperature": request.temperature,
+                },
+            )
         except Exception as e:
             logger.error("Exact cache check failed", error=str(e))
             return None
 
     async def _check_semantic_cache(
-        self, request: QueryRequest
+        self, request: QueryRequest, policy
     ) -> Optional[SemanticMatch]:
         """
         Check semantic cache for similar queries.
@@ -133,7 +176,11 @@ class QueryService:
             return None
 
         try:
-            return await self._semantic.find_match(request.query)
+            return await self._semantic.find_match(
+                request.query,
+                namespace=policy.namespace,
+                threshold=policy.threshold,
+            )
         except Exception as e:
             logger.error("Semantic cache check failed", error=str(e))
             return None
@@ -150,7 +197,7 @@ class QueryService:
         """
         return await self._llm.complete(request)
 
-    async def _store_in_caches(self, request: QueryRequest, llm_response):
+    async def _store_in_caches(self, request: QueryRequest, llm_response, policy):
         """
         Store response in both exact and semantic caches.
 
@@ -158,7 +205,15 @@ class QueryService:
             request: Query request
             llm_response: LLM response
         """
-        query_hash = generate_cache_key(request.query)
+        query_hash = generate_cache_key(
+            request.query,
+            namespace=policy.namespace,
+            system_prompt_hash=request.system_prompt_hash,
+            model=llm_response.model,
+            temperature=request.temperature,
+        )
+        expires_at = datetime.utcnow() + timedelta(seconds=policy.ttl_seconds)
+        stale_until = expires_at + timedelta(seconds=policy.stale_while_revalidate)
 
         # Store in exact cache
         entry = CacheEntry(
@@ -170,10 +225,14 @@ class QueryService:
             prompt_tokens=llm_response.prompt_tokens,
             completion_tokens=llm_response.completion_tokens,
             embedding=None,
+            namespace=policy.namespace,
+            tags=request.tags,
+            expires_at=expires_at,
+            stale_until=stale_until,
         )
 
         try:
-            await self._cache.set(entry)
+            await self._cache.set(entry, ttl_seconds=policy.ttl_seconds + policy.stale_while_revalidate)
         except Exception as e:
             logger.error("Exact cache store failed", error=str(e))
 
@@ -186,6 +245,9 @@ class QueryService:
                     response=llm_response.content,
                     provider=self._llm.get_name(),
                     model=llm_response.model,
+                    namespace=policy.namespace,
+                    tags=request.tags,
+                    expires_at=expires_at.timestamp(),
                 )
             except Exception as e:
                 logger.error("Semantic cache store failed", error=str(e))
@@ -210,7 +272,7 @@ class QueryService:
             provider=entry.provider,
             model=entry.model,
             usage=UsageMetrics.create(entry.prompt_tokens, entry.completion_tokens),
-            cache_info=CacheInfo.exact_hit(),
+            cache_info=CacheInfo.exact_hit(stale=entry.is_stale),
             latency_ms=latency,
         )
 

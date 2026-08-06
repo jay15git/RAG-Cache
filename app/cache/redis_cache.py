@@ -38,7 +38,12 @@ class RedisCache:
         self._repository = repository
         self._ttl = config.cache_ttl_seconds
 
-    async def get(self, query: str) -> Optional[CacheEntry]:
+    async def get(
+        self,
+        query: str,
+        namespace: str = "default",
+        key_context: Optional[dict] = None,
+    ) -> Optional[CacheEntry]:
         """
         Get cached entry for query.
 
@@ -48,17 +53,21 @@ class RedisCache:
         Returns:
             Cache entry if found, None otherwise
         """
-        key = generate_cache_key(query)
+        key_context = key_context or {}
+        key = generate_cache_key(query, namespace=namespace, **key_context)
         entry = await self._repository.fetch(key)
 
         if entry:
+            if entry.is_expired and not entry.is_stale:
+                await self._repository.delete(key)
+                return None
             log_cache_hit(query, source="exact")
             return entry
 
         log_cache_miss(query)
         return None
 
-    async def set(self, entry: CacheEntry) -> bool:
+    async def set(self, entry: CacheEntry, ttl_seconds: Optional[int] = None) -> bool:
         """
         Store cache entry.
 
@@ -69,7 +78,7 @@ class RedisCache:
             True if stored successfully
         """
         key = entry.query_hash
-        success = await self._repository.store(key, entry, self._ttl)
+        success = await self._repository.store(key, entry, self._ttl if ttl_seconds is None else ttl_seconds)
 
         if success:
             logger.info("Cache stored", key=key)

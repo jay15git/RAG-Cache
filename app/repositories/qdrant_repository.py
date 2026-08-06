@@ -272,6 +272,7 @@ class QdrantRepository:
         limit: int = 5,
         score_threshold: Optional[float] = None,
         filter_condition: Optional[Filter] = None,
+        namespace: Optional[str] = None,
     ) -> List[SearchResult]:
         """
         Search for similar vectors.
@@ -301,6 +302,12 @@ class QdrantRepository:
 
             if filter_condition is not None:
                 payload["filter"] = filter_condition.model_dump()
+            if namespace:
+                namespace_clause = {"key": "namespace", "match": {"value": namespace}}
+                if payload.get("filter"):
+                    payload["filter"].setdefault("must", []).append(namespace_clause)
+                else:
+                    payload["filter"] = {"must": [namespace_clause]}
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(

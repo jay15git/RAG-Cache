@@ -35,6 +35,7 @@ class SemanticMatch:
     provider: str
     model: str
     point_id: str
+    expires_at: Optional[float] = None
 
     @property
     def is_high_quality(self) -> bool:
@@ -49,6 +50,12 @@ class SemanticMatch:
     def confidence(self) -> str:
         """Get confidence description."""
         return SimilarityScoreCalculator.get_confidence_level(self.similarity_score)
+
+    @property
+    def is_expired(self) -> bool:
+        import time
+
+        return self.expires_at is not None and time.time() > self.expires_at
 
 
 class SemanticMatcher:
@@ -76,7 +83,12 @@ class SemanticMatcher:
         self._qdrant = qdrant_repository
         self._threshold = similarity_threshold or config.semantic_similarity_threshold
 
-    async def find_match(self, query: str) -> Optional[SemanticMatch]:
+    async def find_match(
+        self,
+        query: str,
+        namespace: str = "default",
+        threshold: Optional[float] = None,
+    ) -> Optional[SemanticMatch]:
         """
         Find best semantic match for a query.
 
@@ -94,11 +106,12 @@ class SemanticMatcher:
             results = await self._qdrant.search_similar(
                 query_vector=embedding,
                 limit=1,
-                score_threshold=self._threshold,
+                score_threshold=threshold if threshold is not None else self._threshold,
+                namespace=namespace,
             )
 
             if not results:
-                logger.info("No semantic match found", query=query[:50])
+                logger.info("No semantic match found", query_hash=hash(query))
                 return None
 
             # Convert top result to match
@@ -107,7 +120,7 @@ class SemanticMatcher:
 
             logger.info(
                 "Semantic match found",
-                query=query[:50],
+                query_hash=hash(query),
                 score=match.similarity_score,
                 level=match.similarity_level.value,
             )
@@ -118,7 +131,13 @@ class SemanticMatcher:
             logger.error("Semantic matching failed", error=str(e))
             raise SemanticMatchError(f"Failed to find semantic match: {str(e)}")
 
-    async def find_matches(self, query: str, limit: int = 5) -> List[SemanticMatch]:
+    async def find_matches(
+        self,
+        query: str,
+        limit: int = 5,
+        namespace: str = "default",
+        threshold: Optional[float] = None,
+    ) -> List[SemanticMatch]:
         """
         Find multiple semantic matches for a query.
 
@@ -137,7 +156,8 @@ class SemanticMatcher:
             results = await self._qdrant.search_similar(
                 query_vector=embedding,
                 limit=limit,
-                score_threshold=self._threshold,
+                score_threshold=threshold if threshold is not None else self._threshold,
+                namespace=namespace,
             )
 
             # Convert to matches
@@ -145,7 +165,7 @@ class SemanticMatcher:
 
             logger.info(
                 "Semantic matches found",
-                query=query[:50],
+                query_hash=hash(query),
                 count=len(matches),
             )
 
@@ -162,6 +182,9 @@ class SemanticMatcher:
         response: str,
         provider: str,
         model: str,
+        namespace: str = "default",
+        tags: Optional[list[str]] = None,
+        expires_at: Optional[float] = None,
     ) -> bool:
         """
         Store a query-response pair for future matching.
@@ -191,6 +214,9 @@ class SemanticMatcher:
                     "response": response,
                     "provider": provider,
                     "model": model,
+                    "namespace": namespace,
+                    "tags": tags or [],
+                    "expires_at": expires_at,
                 },
             )
 
@@ -231,6 +257,7 @@ class SemanticMatcher:
             provider=payload.get("provider", "unknown"),
             model=payload.get("model", "unknown"),
             point_id=result.point_id,
+            expires_at=payload.get("expires_at"),
         )
 
     async def is_healthy(self) -> bool:

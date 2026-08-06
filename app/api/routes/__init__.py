@@ -4,6 +4,6 @@ API Routes module.
 Contains all API endpoint routers.
 """
 
-from app.api.routes import docs, health, metrics, query
+from app.api.routes import admin, docs, health, metrics, query
 
-__all__ = ["health", "query", "metrics", "docs"]
+__all__ = ["admin", "health", "query", "metrics", "docs"]

@@ -93,7 +93,7 @@ def log_cache_hit(query: str, source: str, **kwargs: Any) -> None:
         **kwargs: Additional context
     """
     logger = get_logger("cache")
-    logger.info("cache_hit", query=query[:100], source=source, **kwargs)
+    logger.info("cache_hit", query_hash=hash(query), source=source, **kwargs)
 
 
 def log_cache_miss(query: str, **kwargs: Any) -> None:
@@ -105,7 +105,7 @@ def log_cache_miss(query: str, **kwargs: Any) -> None:
         **kwargs: Additional context
     """
     logger = get_logger("cache")
-    logger.info("cache_miss", query=query[:100], **kwargs)
+    logger.info("cache_miss", query_hash=hash(query), **kwargs)
 
 
 def log_llm_call(provider: str, model: str, tokens: int, **kwargs: Any) -> None:

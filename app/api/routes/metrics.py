@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.config import config
 from app.utils.logger import get_logger
+from app.monitoring.prometheus import get_metrics as get_prometheus_registry
 
 logger = get_logger(__name__)
 
@@ -75,6 +76,7 @@ async def get_metrics(request: Request) -> Dict[str, Any]:
             "similarity_threshold": config.semantic_similarity_threshold,
             "cache_ttl_seconds": config.cache_ttl_seconds,
         },
+        "observability": get_prometheus_registry().get_summary(),
     }
 
 
@@ -87,6 +89,7 @@ async def get_prometheus_metrics(request: Request) -> str:
         Prometheus-formatted metrics string
     """
     metrics = await get_metrics(request)
+    registry = get_prometheus_registry()
     lines = []
 
     # Application info
@@ -123,5 +126,7 @@ async def get_prometheus_metrics(request: Request) -> str:
         lines.append(f"# HELP ragcache_redis_memory_bytes Redis memory usage")
         lines.append(f"# TYPE ragcache_redis_memory_bytes gauge")
         lines.append(f'ragcache_redis_memory_bytes {cache.get("memory_used_bytes", 0)}')
+
+    lines.append(registry.export_prometheus())
 
     return "\n".join(lines)

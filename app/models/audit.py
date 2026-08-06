@@ -25,6 +25,7 @@ class EventType(str, Enum):
     ERROR = "error"
     RATE_LIMIT = "rate_limit"
     HEALTH_CHECK = "health_check"
+    INVALIDATION = "invalidation"
     SYSTEM_START = "system_start"
     SYSTEM_STOP = "system_stop"
 

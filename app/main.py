@@ -18,7 +18,7 @@ from app.api.middleware import (
     RequestLoggingMiddleware,
     default_logging_config,
 )
-from app.api.routes import health, metrics, query
+from app.api.routes import admin, health, metrics, query
 from app.api.routes.docs import API_DESCRIPTION, TAGS_METADATA
 from app.config import config
 from app.repositories.redis_repository import create_redis_pool
@@ -130,6 +130,7 @@ def create_application() -> FastAPI:
     app.include_router(health.router, tags=["health"])
     app.include_router(query.router, prefix="/api/v1", tags=["query"])
     app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
+    app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
 
     return app
 

@@ -57,6 +57,7 @@ class PrometheusMetrics:
         self._gauges: Dict[str, Dict[str, float]] = {}
         self._histograms: Dict[str, Dict[str, HistogramValue]] = {}
         self._start_time = time.time()
+        self._latencies_ms: List[float] = []
 
         # Default histogram buckets (in seconds for latency)
         self._default_buckets = [
@@ -99,6 +100,10 @@ class PrometheusMetrics:
             "ragcache_cache_misses_total", "Total number of cache misses"
         )
         self._register_gauge("ragcache_cache_hit_rate", "Current cache hit rate")
+        self._register_counter("ragcache_cache_near_misses_total", "Semantic matches below threshold")
+        self._register_counter("ragcache_cache_false_hits_total", "Detected semantic false hits")
+        self._register_counter("ragcache_cache_stale_hits_total", "Stale responses served")
+        self._register_gauge("ragcache_estimated_cost_saved_usd", "Estimated LLM cost saved")
 
         # LLM metrics
         self._register_counter(
@@ -228,6 +233,7 @@ class PrometheusMetrics:
         labels = {"method": method, "path": path, "status": str(status_code)}
 
         self.inc_counter("ragcache_requests_total", labels=labels)
+        self._latencies_ms.append(duration_seconds * 1000)
         self.observe_histogram(
             "ragcache_request_duration_seconds", duration_seconds, labels
         )
@@ -244,6 +250,22 @@ class PrometheusMetrics:
         """Track a cache miss."""
         self.inc_counter("ragcache_cache_misses_total")
         self._update_hit_rate()
+
+    def track_cache_decision(self, decision: str, latency_ms: float = 0.0, cost_saved_usd: float = 0.0) -> None:
+        if decision in ("exact", "semantic"):
+            self.track_cache_hit(decision)
+        elif decision == "near_miss":
+            self.inc_counter("ragcache_cache_near_misses_total")
+        elif decision == "stale":
+            self.inc_counter("ragcache_cache_stale_hits_total")
+        else:
+            self.track_cache_miss()
+        if cost_saved_usd:
+            self.inc_gauge("ragcache_estimated_cost_saved_usd", cost_saved_usd)
+
+    def track_quality_check(self, false_hit: bool) -> None:
+        if false_hit:
+            self.inc_counter("ragcache_cache_false_hits_total")
 
     def _update_hit_rate(self) -> None:
         """Update the cache hit rate gauge."""
@@ -359,6 +381,13 @@ class PrometheusMetrics:
 
     def get_summary(self) -> Dict:
         """Get metrics summary as dictionary."""
+        ordered = sorted(self._latencies_ms)
+
+        def percentile(value: float) -> float:
+            if not ordered:
+                return 0.0
+            return ordered[min(len(ordered) - 1, int(len(ordered) * value))]
+
         return {
             "uptime_seconds": self.get_uptime_seconds(),
             "counters": {
@@ -368,6 +397,11 @@ class PrometheusMetrics:
             "gauges": {
                 k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")}
                 for k, v in self._gauges.items()
+            },
+            "latency_ms": {
+                "p50": round(percentile(0.50), 2),
+                "p95": round(percentile(0.95), 2),
+                "p99": round(percentile(0.99), 2),
             },
         }
 
