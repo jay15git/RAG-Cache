@@ -76,7 +76,7 @@ class TestRateLimiter:
     async def test_rate_limit_blocks_when_exceeded(self) -> None:
         """Test that rate limiter blocks when limit exceeded."""
         # Very low limit for testing
-        config = RateLimitConfig(requests_per_minute=2)
+        config = RateLimitConfig(requests_per_minute=2, window_seconds=1.0)
         limiter = RateLimiter(config)
 
         # First two requests should be fast

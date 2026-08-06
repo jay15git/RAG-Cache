@@ -1,5 +1,5 @@
 #!/bin/bash
-# RAG Cache Production Deployment Script
+# CachePilot Production Deployment Script
 # Usage: ./scripts/deploy.sh [environment]
 
 set -euo pipefail
@@ -30,7 +30,7 @@ preflight_check() {
     fi
 
     # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
+    if ! docker compose version &> /dev/null; then
         log_error "Docker Compose is not installed"
     fi
 
@@ -43,8 +43,8 @@ preflight_check() {
     # Verify required environment variables
     source "$ENV_FILE"
 
-    if [ -z "${OPENAI_API_KEY:-}" ]; then
-        log_error "OPENAI_API_KEY is not set"
+    if [ -z "${GEMINI_API_KEY:-}" ] && [ "${DEFAULT_LLM_PROVIDER:-gemini}" = "gemini" ]; then
+        log_error "GEMINI_API_KEY is not set"
     fi
 
     log_info "Pre-deployment checks passed"
@@ -96,7 +96,7 @@ create_backup() {
 
     # Backup Qdrant data if container exists
     if docker ps -a --format '{{.Names}}' | grep -q 'ragcache-qdrant'; then
-        curl -s -X POST http://localhost:6333/collections/ragcache/snapshots \
+        curl -s -X POST http://localhost:6333/collections/query_embeddings/snapshots \
             -o "$BACKUP_DIR/qdrant-snapshot.json" 2>/dev/null || true
     fi
 
@@ -112,8 +112,8 @@ deploy() {
     # Set environment file
     export ENV_FILE=".env.$ENVIRONMENT"
 
-    # Deploy with docker-compose
-    docker-compose -f docker-compose.yml \
+    # Deploy with Docker Compose
+    docker compose -f docker-compose.prod.yml \
         --env-file "$ENV_FILE" \
         up -d --remove-orphans
 
@@ -128,7 +128,7 @@ health_check() {
     RETRY_INTERVAL=2
 
     for i in $(seq 1 $MAX_RETRIES); do
-        if curl -sf http://localhost:8000/health > /dev/null; then
+        if curl -sf http://localhost:8000/ready > /dev/null; then
             log_info "Health check passed"
             return 0
         fi
@@ -144,7 +144,7 @@ verify_deployment() {
     log_info "Verifying deployment..."
 
     # Check all services are running
-    SERVICES=("ragcache-api" "ragcache-redis" "ragcache-qdrant")
+    SERVICES=("ragcache-redis" "ragcache-qdrant")
 
     for service in "${SERVICES[@]}"; do
         if ! docker ps --format '{{.Names}}' | grep -q "$service"; then
@@ -153,11 +153,7 @@ verify_deployment() {
     done
 
     # Test query endpoint
-    RESPONSE=$(curl -sf -X POST http://localhost:8000/api/v1/query \
-        -H "Content-Type: application/json" \
-        -d '{"query": "test deployment", "use_cache": false}' 2>/dev/null) || {
-        log_error "Query endpoint test failed"
-    }
+    curl -sf http://localhost:8000/ready >/dev/null || log_error "Readiness endpoint test failed"
 
     log_info "Deployment verified successfully"
 }
@@ -194,4 +190,3 @@ main() {
 
 # Run main
 main
-

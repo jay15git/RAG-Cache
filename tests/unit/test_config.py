@@ -9,7 +9,7 @@ class TestAppConfig:
     def test_should_load_default_values(self):
         """Test default configuration."""
         config = AppConfig()
-        assert config.app_name == "RAGCache"
+        assert config.app_name == "CachePilot"
         assert config.redis_port == 6379
         assert config.api_port == 8000
 

@@ -26,7 +26,11 @@ class InvalidationService:
                 if entry and set(tags).intersection(entry.tags):
                     matched.append(key)
             keys = matched
-        return sum(1 for key in keys if await self.cache._repository.delete(key))
+        deleted = 0
+        for key in keys:
+            if await self.cache._repository.delete(key):
+                deleted += 1
+        return deleted
 
     async def invalidate_all(self, tenant_id: str) -> int:
         return await self.invalidate_tenant(tenant_id)

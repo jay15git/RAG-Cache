@@ -14,7 +14,7 @@ from qdrant_client import AsyncQdrantClient
 from app.cache.redis_cache import RedisCache
 from app.config import config
 from app.embeddings.embedding_generator import EmbeddingGenerator
-from app.llm.openai_provider import OpenAIProvider
+from app.llm.factory import LLMProviderFactory
 from app.pipeline.semantic_matcher import SemanticMatcher
 from app.repositories.qdrant_repository import QdrantRepository
 from app.repositories.redis_repository import RedisRepository
@@ -114,14 +114,7 @@ async def get_llm_provider(provider_name: str | None = None):
     """
     provider = provider_name or config.default_llm_provider
 
-    if provider == "openai":
-        return OpenAIProvider(config.openai_api_key)
-    # Add other providers here in the future
-    # elif provider == "anthropic":
-    #     return AnthropicProvider(config.anthropic_api_key)
-
-    # Default to OpenAI
-    return OpenAIProvider(config.openai_api_key)
+    return LLMProviderFactory.create(provider)
 
 
 async def get_query_service(

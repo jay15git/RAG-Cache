@@ -439,7 +439,11 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with metrics tracking."""
         # Skip metrics for metrics endpoint itself
-        if request.url.path in ("/metrics", "/api/v1/metrics/prometheus"):
+        if request.url.path in (
+            "/metrics",
+            "/api/v1/metrics",
+            "/api/v1/metrics/prometheus",
+        ):
             return await call_next(request)
 
         start_time = time.time()

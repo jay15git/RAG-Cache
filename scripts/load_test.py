@@ -15,8 +15,10 @@ async def run(requests: int, repeat_ratio: float, tenants: int, miss_latency_ms:
     latencies, hits, misses = [], 0, 0
     for index in range(requests):
         tenant = f"tenant-{rng.randrange(tenants)}"
-        query_id = index if rng.random() > repeat_ratio or not cache else rng.choice(list(cache))
-        key = (tenant, query_id)
+        if cache and rng.random() <= repeat_ratio:
+            key = rng.choice(list(cache))
+        else:
+            key = (tenant, index)
         started = time.perf_counter()
         if key in cache:
             hits += 1
@@ -27,7 +29,7 @@ async def run(requests: int, repeat_ratio: float, tenants: int, miss_latency_ms:
             cache[key] = True
         latencies.append((time.perf_counter() - started) * 1000)
     ordered = sorted(latencies)
-    percentile = lambda p: ordered[min(len(ordered) - 1, int(len(ordered) * p))]
+    percentile = lambda p: ordered[min(len(ordered) - 1, int((len(ordered) - 1) * p))]
     tokens_saved = hits * 500
     return {
         "requests": requests,
@@ -37,6 +39,7 @@ async def run(requests: int, repeat_ratio: float, tenants: int, miss_latency_ms:
         "misses": misses,
         "hit_rate": round(hits / requests, 4) if requests else 0,
         "p50_latency_ms": round(percentile(0.50), 3) if ordered else 0,
+        "p75_latency_ms": round(percentile(0.75), 3) if ordered else 0,
         "p95_latency_ms": round(percentile(0.95), 3) if ordered else 0,
         "p99_latency_ms": round(percentile(0.99), 3) if ordered else 0,
         "estimated_tokens_saved": tokens_saved,

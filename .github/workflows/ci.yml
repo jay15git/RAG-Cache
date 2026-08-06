@@ -108,7 +108,7 @@ jobs:
 
       # Qdrant service container
       qdrant:
-        image: qdrant/qdrant:v1.6.1
+        image: qdrant/qdrant:v1.15.1
         ports:
           - 6333:6333
           - 6334:6334
@@ -164,7 +164,7 @@ jobs:
             docker ps -a | grep qdrant || true
             echo ""
             echo "DEBUG: Docker logs:"
-            docker logs $(docker ps -aq --filter ancestor=qdrant/qdrant:v1.6.1) 2>&1 | tail -50 || true
+            docker logs $(docker ps -aq --filter ancestor=qdrant/qdrant:v1.15.1) 2>&1 | tail -50 || true
             exit 1
           fi
 
@@ -174,7 +174,7 @@ jobs:
           REDIS_PORT: 6379
           QDRANT_HOST: localhost
           QDRANT_PORT: 6333
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: test-key
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           # Run LLM integration tests (Epic 5) without coverage failure threshold
@@ -188,7 +188,7 @@ jobs:
           # (these have pre-existing issues unrelated to Epic 5)
           pytest tests/integration/ -v -m integration \
             --ignore=tests/integration/test_llm_providers.py \
-            --maxfail=20 --no-cov || echo "⚠️  Some pre-existing integration tests failed (not blocking)"
+            --maxfail=20 --no-cov || echo "Some integration tests failed (not blocking)"
 
   # Job 4: Docker Build Test
   docker-build:

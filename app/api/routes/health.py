@@ -92,9 +92,8 @@ async def check_qdrant_health(request: Request) -> ComponentHealth:
                 status="degraded", message="Qdrant client not initialized"
             )
 
-        # If Qdrant client exists, try to ping it
         start = time.time()
-        # Would call qdrant health check here
+        await app_state.qdrant_client.get_collections()
         latency = (time.time() - start) * 1000
 
         return ComponentHealth(status="healthy", latency_ms=round(latency, 2))
@@ -141,6 +140,16 @@ async def readiness_check(request: Request) -> DetailedHealthResponse:
         Detailed health status response
     """
     components = {}
+
+    provider_key = {
+        "gemini": config.gemini_api_key,
+        "openai": config.openai_api_key,
+        "anthropic": config.anthropic_api_key,
+    }.get(config.default_llm_provider, "")
+    components["llm_provider"] = ComponentHealth(
+        status="healthy" if provider_key else "degraded",
+        message=(None if provider_key else f"{config.default_llm_provider.upper()}_API_KEY not configured"),
+    )
 
     # Check Redis
     redis_health = await check_redis_health(request)

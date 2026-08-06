@@ -1,7 +1,7 @@
 """
 API Documentation configuration.
 
-Enhanced OpenAPI documentation for the RAGCache API.
+OpenAPI documentation for the CachePilot API.
 
 Sandi Metz Principles:
 - Single Responsibility: API documentation
@@ -25,44 +25,28 @@ TAGS_METADATA = [
         "description": "Metrics and monitoring endpoints for observability.",
     },
     {
-        "name": "cache",
-        "description": "Cache management endpoints for cache operations.",
+        "name": "admin",
+        "description": "Tenant-scoped cache invalidation controls.",
     },
 ]
 
 
 # API Description
 API_DESCRIPTION = """
-# RAGCache API
+# CachePilot API
 
-**Token-efficient RAG caching platform** that reduces LLM API costs by caching and reusing responses.
+CachePilot checks an exact Redis cache, then a tenant-scoped semantic Qdrant cache, before calling the configured LLM provider.
 
 ## Features
 
-- 🚀 **Exact Cache**: Fast Redis-based exact match caching
-- 🧠 **Semantic Cache**: Vector similarity search for semantically similar queries
-- 💰 **Cost Savings**: Reduce LLM API calls by up to 80%
-- ⚡ **Low Latency**: Sub-100ms cache hits
-- 📊 **Metrics**: Built-in monitoring and observability
+- Exact Redis cache with tenant, system-prompt, model, and temperature-aware keys
+- Semantic Qdrant cache backed by local CPU embeddings
+- Query-aware similarity, TTL, and stale-response policies
+- Prometheus-compatible metrics and a bounded, PII-redacted audit trail
 
 ## Authentication
 
-Protected endpoints require an API key passed in the `X-API-Key` header:
-
-```
-X-API-Key: your-api-key-here
-```
-
-## Rate Limiting
-
-API requests are rate limited to prevent abuse:
-- **60 requests per minute** per client
-- **1000 requests per hour** per client
-
-Rate limit headers are included in responses:
-- `X-RateLimit-Limit`: Maximum requests per window
-- `X-RateLimit-Remaining`: Requests remaining
-- `X-RateLimit-Reset`: Unix timestamp when limit resets
+No HTTP authentication middleware is enabled by default. Do not expose the query or admin endpoints publicly without adding authentication and authorization.
 
 ## Response Formats
 
@@ -75,19 +59,16 @@ All responses are JSON. Successful responses include:
 ## Error Handling
 
 Errors return appropriate HTTP status codes with details:
-- `400`: Bad Request - Invalid input
-- `401`: Unauthorized - Missing or invalid API key
-- `429`: Too Many Requests - Rate limit exceeded
-- `500`: Internal Server Error - Unexpected error
-- `502`: Bad Gateway - LLM provider error
+- `422`: Invalid request body
+- `500`: Internal server error
+- `502`: LLM provider error
 """
 
 
 # Contact information
 API_CONTACT = {
-    "name": "RAGCache Team",
-    "url": "https://github.com/ragcache/ragcache",
-    "email": "support@ragcache.io",
+    "name": "CachePilot",
+    "url": "https://github.com/jay15git/RAG-Cache",
 }
 
 
@@ -106,7 +87,7 @@ def get_openapi_config() -> Dict[str, Any]:
         OpenAPI configuration dictionary
     """
     return {
-        "title": "RAGCache API",
+        "title": "CachePilot API",
         "description": API_DESCRIPTION,
         "version": "0.1.0",
         "contact": API_CONTACT,
@@ -121,27 +102,31 @@ def get_openapi_config() -> Dict[str, Any]:
 
 # Example request/response for documentation
 QUERY_EXAMPLE = {
-    "query": "What is machine learning?",
+    "query": "What is semantic caching?",
     "use_cache": True,
-    "provider": "openai",
-    "model": "gpt-3.5-turbo",
-    "max_tokens": 500,
-    "temperature": 0.7,
+    "provider": "gemini",
+    "model": "gemini-2.0-flash",
+    "max_tokens": 1000,
+    "temperature": 0.2,
+    "tenant_id": "demo",
+    "system_prompt_hash": "assistant-v1",
+    "tags": ["documentation"],
 }
 
 QUERY_RESPONSE_EXAMPLE = {
-    "response": "Machine learning is a subset of artificial intelligence...",
-    "provider": "openai",
-    "model": "gpt-3.5-turbo",
+    "response": "Semantic caching reuses a response for a sufficiently similar prompt.",
+    "provider": "gemini",
+    "model": "gemini-2.0-flash",
     "usage": {
         "prompt_tokens": 10,
-        "completion_tokens": 150,
-        "total_tokens": 160,
+        "completion_tokens": 20,
+        "total_tokens": 30,
     },
     "cache_info": {
         "cache_hit": True,
         "cache_type": "semantic",
-        "similarity_score": 0.92,
+        "similarity_score": 0.91,
+        "stale": False,
     },
-    "latency_ms": 45.2,
+    "latency_ms": 8.42,
 }

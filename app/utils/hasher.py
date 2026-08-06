@@ -43,7 +43,8 @@ def generate_cache_key(
     normalized = normalize_query(query)
     if namespace == "default" and not any((system_prompt_hash, model, temperature is not None)):
         return f"query:{hashlib.sha256(normalized.encode()).hexdigest()}"
-    context = "|".join([namespace.strip() or "default", system_prompt_hash, model, str(temperature or "")])
+    temperature_value = "" if temperature is None else str(temperature)
+    context = "|".join([namespace.strip() or "default", system_prompt_hash, model, temperature_value])
     hash_value = hashlib.sha256(f"{context}|{normalized}".encode()).hexdigest()
     return f"cache:{namespace.strip() or 'default'}:query:{hash_value}"
 

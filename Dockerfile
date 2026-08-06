@@ -23,6 +23,7 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.13.0 && \
     pip install --no-cache-dir -r requirements.txt
 
 # Stage 3: Development image
@@ -35,10 +36,13 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 # Copy application code
 COPY ./app ./app
 COPY ./tests ./tests
+COPY ./scripts ./scripts
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    mkdir -p /tmp/huggingface && \
+    chown -R appuser:appuser /tmp/huggingface
 
 USER appuser
 
@@ -55,7 +59,9 @@ COPY ./app ./app
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    mkdir -p /tmp/huggingface && \
+    chown -R appuser:appuser /tmp/huggingface
 
 USER appuser
 

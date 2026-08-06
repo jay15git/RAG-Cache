@@ -1,6 +1,6 @@
 # CachePilot case study
 
-CachePilot is the production layer around RAG-Cache: a multi-tenant semantic cache that prevents redundant LLM calls while preserving isolation and response freshness controls.
+CachePilot is a multi-tenant semantic cache for LLM requests. It extends the upstream RAG-Cache foundation with cache identity, policy, isolation, invalidation, quality, and measurement controls.
 
 ## Engineering signals
 
@@ -13,7 +13,15 @@ CachePilot is the production layer around RAG-Cache: a multi-tenant semantic cac
 ## Reproduce benchmark
 
 ```bash
-python scripts/load_test.py --requests 2000 --repeat-ratio 0.6 --tenants 3 --output benchmark.json
+docker compose exec -T api python scripts/load_test.py \
+  --requests 2000 \
+  --repeat-ratio 0.6 \
+  --tenants 3 \
+  --miss-latency-ms 25 \
+  --seed 42 \
+  --output benchmark.json
 ```
 
-Benchmark output is measured locally. Do not claim savings beyond the generated report.
+Reference local run: 2,000 requests, 3 tenants, 61.45% hit rate, P50 0.024 ms, P75 26.071 ms, P95 29.618 ms, P99 30.348 ms, and 614,500 estimated tokens avoided.
+
+The benchmark is deterministic cache simulation. It models a 25 ms miss path and does not call Gemini, Redis, Qdrant, or a live HTTP endpoint. Do not present its estimates as production provider latency or billing data.

@@ -1,326 +1,73 @@
-# RAG Cache Configuration Guide
+# CachePilot configuration
 
-## Table of Contents
+Configuration is loaded by `app.config.AppConfig` from `.env`, then overridden by environment variables. Use `.env.example` for local Docker and `.env.production.example` as the production template.
 
-- [Overview](#overview)
-- [Environment Variables](#environment-variables)
-- [Application Configuration](#application-configuration)
-- [Cache Configuration](#cache-configuration)
-- [LLM Provider Configuration](#llm-provider-configuration)
-- [Monitoring Configuration](#monitoring-configuration)
-- [Security Configuration](#security-configuration)
+## Application and API
 
-## Overview
+| Variable | Default | Notes |
+|---|---|---|
+| `APP_NAME` | `CachePilot` | Display name in JSON metrics. |
+| `APP_ENV` | `development` | `development`, `staging`, or `production`. |
+| `LOG_LEVEL` | `INFO` | Application log level. |
+| `DEBUG` | `false` | FastAPI debug setting. |
+| `API_HOST` | `0.0.0.0` | Uvicorn bind host. |
+| `API_PORT` | `8000` | Uvicorn bind port. |
+| `API_WORKERS` | `4` | Production Uvicorn worker setting. |
+| `ALLOWED_ORIGINS` | local hosts | Comma-separated CORS origins. |
 
-RAG Cache uses environment variables and Pydantic-based configuration for flexible, type-safe settings management. All configuration is validated at startup.
+## Redis and Qdrant
 
-### Configuration Loading Order
+| Variable | Default | Notes |
+|---|---|---|
+| `REDIS_HOST` | `localhost` | Use `redis` in Docker. |
+| `REDIS_PORT` | `6379` | Redis port. |
+| `REDIS_DB` | `0` | Redis database number. |
+| `REDIS_PASSWORD` | empty | Set this in production. |
+| `REDIS_MAX_CONNECTIONS` | `10` | Redis connection pool size. |
+| `QDRANT_HOST` | `localhost` | Use `qdrant` in Docker. |
+| `QDRANT_PORT` | `6333` | Qdrant HTTP port. |
+| `QDRANT_GRPC_PORT` | `6334` | Qdrant gRPC port. |
+| `QDRANT_COLLECTION_NAME` | `query_embeddings` | Semantic cache collection. |
+| `QDRANT_VECTOR_SIZE` | `384` | Must match the embedding model. |
 
-1. Default values (hardcoded)
-2. `.env` file
-3. Environment variables (override `.env`)
-4. Command-line arguments (where applicable)
+## LLM provider
 
-## Environment Variables
+| Variable | Default | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | empty | Required for the default Gemini provider. |
+| `OPENAI_API_KEY` | empty | Required only when OpenAI is the configured default provider. |
+| `ANTHROPIC_API_KEY` | empty | Required only when Anthropic is the configured default provider. |
+| `DEFAULT_LLM_PROVIDER` | `gemini` | `gemini`, `openai`, or `anthropic`. |
+| `DEFAULT_MODEL` | `gemini-2.0-flash` | Used unless a request supplies `model`. |
+| `DEFAULT_MAX_TOKENS` | `1000` | Default generation token cap. |
+| `DEFAULT_TEMPERATURE` | `0.7` | Default generation temperature. |
 
-### Core Application
+## Embeddings
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `APP_NAME` | string | `RAG-Cache` | Application name |
-| `APP_VERSION` | string | `1.0.0` | Application version |
-| `APP_ENV` | string | `development` | Environment: `development`, `staging`, `production` |
-| `DEBUG` | bool | `false` | Enable debug mode |
-| `LOG_LEVEL` | string | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| Variable | Default | Notes |
+|---|---|---|
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local SentenceTransformers model. |
+| `EMBEDDING_DEVICE` | `cpu` | Valid values: `cpu`, `cuda`. Docker uses CPU-only PyTorch. |
+| `EMBEDDING_BATCH_SIZE` | `32` | Batch size for batch embedding calls. |
+| `HF_HOME` | unset outside Compose | Set to `/tmp/huggingface` in Compose to persist downloaded model files. |
 
-### Server Configuration
+The default model produces 384-dimension vectors. If the model changes, update `QDRANT_VECTOR_SIZE` and recreate the Qdrant collection.
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `HOST` | string | `0.0.0.0` | Server bind host |
-| `PORT` | int | `8000` | Server bind port |
-| `WORKERS` | int | `1` | Number of Uvicorn workers |
-| `RELOAD` | bool | `false` | Enable auto-reload (dev only) |
+## Cache and monitoring
 
-### Redis Configuration
+| Variable | Default | Notes |
+|---|---|---|
+| `CACHE_TTL_SECONDS` | `3600` | Base TTL. Policy can lower it. |
+| `SEMANTIC_SIMILARITY_THRESHOLD` | `0.85` | Default stable-request threshold. |
+| `ENABLE_SEMANTIC_CACHE` | `true` | Disables Qdrant lookup and writes when false. |
+| `ENABLE_EXACT_CACHE` | `true` | Configuration value is exposed in metrics. Exact request behavior currently follows `use_cache`. |
+| `ENABLE_METRICS` | `true` | Configuration value is exposed in metrics. |
+| `METRICS_PORT` | `9090` | Reserved setting; metrics are served by the API at `/api/v1/metrics/prometheus`. |
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `REDIS_HOST` | string | `localhost` | Redis host |
-| `REDIS_PORT` | int | `6379` | Redis port |
-| `REDIS_PASSWORD` | string | `""` | Redis password |
-| `REDIS_DB` | int | `0` | Redis database number |
-| `REDIS_POOL_SIZE` | int | `10` | Connection pool size |
-| `REDIS_SOCKET_TIMEOUT` | int | `5` | Socket timeout (seconds) |
-
-### Qdrant Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `QDRANT_HOST` | string | `localhost` | Qdrant host |
-| `QDRANT_PORT` | int | `6333` | Qdrant port |
-| `QDRANT_API_KEY` | string | `""` | Qdrant API key |
-| `QDRANT_COLLECTION_NAME` | string | `ragcache` | Collection name |
-| `QDRANT_VECTOR_SIZE` | int | `384` | Vector dimensions |
-
-### LLM Provider Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `OPENAI_API_KEY` | string | *required* | OpenAI API key |
-| `ANTHROPIC_API_KEY` | string | `""` | Anthropic API key |
-| `DEFAULT_LLM_PROVIDER` | string | `openai` | Default provider |
-| `DEFAULT_MODEL` | string | `gpt-3.5-turbo` | Default model |
-| `DEFAULT_MAX_TOKENS` | int | `500` | Default max tokens |
-| `DEFAULT_TEMPERATURE` | float | `0.7` | Default temperature |
-
-### Cache Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `CACHE_TTL` | int | `3600` | Default TTL (seconds) |
-| `SEMANTIC_THRESHOLD` | float | `0.85` | Default similarity threshold |
-| `MAX_CACHE_SIZE` | int | `10000` | Maximum cache entries |
-| `CACHE_ENABLED` | bool | `true` | Enable caching |
-
-### Monitoring Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `METRICS_ENABLED` | bool | `true` | Enable Prometheus metrics |
-| `METRICS_PATH` | string | `/metrics` | Metrics endpoint path |
-| `HEALTH_CHECK_INTERVAL` | int | `30` | Health check interval (seconds) |
-
-## Application Configuration
-
-### Configuration Class
-
-```python
-# app/config.py
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    """Application settings with validation."""
-
-    # Application
-    app_name: str = "RAG-Cache"
-    app_version: str = "1.0.0"
-    app_env: str = "development"
-    debug: bool = False
-
-    # Server
-    host: str = "0.0.0.0"
-    port: int = 8000
-    workers: int = 1
-
-    # Redis
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_password: str = ""
-
-    # Qdrant
-    qdrant_host: str = "localhost"
-    qdrant_port: int = 6333
-
-    # LLM
-    openai_api_key: str
-    default_model: str = "gpt-3.5-turbo"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-config = Settings()
-```
-
-### Accessing Configuration
-
-```python
-from app.config import config
-
-# Access settings
-api_key = config.openai_api_key
-redis_host = config.redis_host
-
-# Check environment
-if config.app_env == "production":
-    # Production-specific logic
-    pass
-```
-
-## Cache Configuration
-
-### TTL Configuration
-
-```python
-# Different TTL for different response types
-TTL_CONFIG = {
-    "default": 3600,           # 1 hour
-    "short_lived": 300,        # 5 minutes
-    "long_lived": 86400,       # 24 hours
-    "permanent": None,         # No expiration
-}
-```
-
-### Semantic Threshold Tuning
-
-| Threshold | Use Case | Hit Rate | Precision |
-|-----------|----------|----------|-----------|
-| `0.95` | Strict matching | Low | Very High |
-| `0.90` | High precision | Medium | High |
-| `0.85` | Balanced (default) | Medium-High | Good |
-| `0.80` | Higher hit rate | High | Moderate |
-| `0.75` | Maximum coverage | Very High | Lower |
-
-### Example Configuration
+## Production configuration
 
 ```bash
-# .env
-CACHE_TTL=7200              # 2 hours
-SEMANTIC_THRESHOLD=0.88     # Slightly higher precision
-MAX_CACHE_SIZE=50000        # Larger cache
+cp .env.production.example .env.production
 ```
 
-## LLM Provider Configuration
-
-### OpenAI Models
-
-| Model | Speed | Cost | Quality |
-|-------|-------|------|---------|
-| `gpt-3.5-turbo` | Fast | Low | Good |
-| `gpt-4` | Slow | High | Best |
-| `gpt-4-turbo` | Medium | Medium | Very Good |
-| `gpt-4o` | Fast | Medium | Very Good |
-
-### Anthropic Models
-
-| Model | Speed | Cost | Quality |
-|-------|-------|------|---------|
-| `claude-3-5-sonnet` | Medium | Medium | Very Good |
-| `claude-3-opus` | Slow | High | Best |
-| `claude-3-haiku` | Fast | Low | Good |
-
-### Rate Limiting
-
-```bash
-# Provider-specific rate limits
-OPENAI_RATE_LIMIT=60         # Requests per minute
-ANTHROPIC_RATE_LIMIT=50      # Requests per minute
-```
-
-## Monitoring Configuration
-
-### Prometheus Metrics
-
-```bash
-# Enable/disable metrics
-METRICS_ENABLED=true
-
-# Configure scrape interval
-METRICS_SCRAPE_INTERVAL=15s
-```
-
-### Alert Thresholds
-
-```bash
-# Alert configuration
-ALERT_ERROR_RATE_THRESHOLD=0.05      # 5% error rate
-ALERT_CACHE_HIT_RATE_MIN=0.20        # Minimum 20% hit rate
-ALERT_LLM_LATENCY_MAX_MS=5000        # 5 second max latency
-```
-
-## Security Configuration
-
-### API Authentication
-
-```bash
-# API key authentication
-API_KEY_ENABLED=true
-API_KEY=your-secure-api-key
-
-# Allowed API keys (comma-separated)
-ALLOWED_API_KEYS=key1,key2,key3
-```
-
-### CORS Configuration
-
-```bash
-# CORS settings
-CORS_ORIGINS=https://app.example.com,https://admin.example.com
-CORS_ALLOW_CREDENTIALS=true
-CORS_ALLOW_METHODS=GET,POST,DELETE
-CORS_ALLOW_HEADERS=*
-```
-
-### Rate Limiting
-
-```bash
-# Rate limiting
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS=100        # Requests per window
-RATE_LIMIT_WINDOW=60           # Window in seconds
-```
-
-## Configuration Profiles
-
-### Development
-
-```bash
-# .env.development
-APP_ENV=development
-DEBUG=true
-LOG_LEVEL=DEBUG
-RELOAD=true
-WORKERS=1
-CACHE_TTL=300
-```
-
-### Staging
-
-```bash
-# .env.staging
-APP_ENV=staging
-DEBUG=false
-LOG_LEVEL=INFO
-RELOAD=false
-WORKERS=2
-CACHE_TTL=1800
-```
-
-### Production
-
-```bash
-# .env.production
-APP_ENV=production
-DEBUG=false
-LOG_LEVEL=WARNING
-RELOAD=false
-WORKERS=4
-CACHE_TTL=3600
-```
-
-## Validation
-
-Configuration is validated at startup:
-
-```python
-# Startup validation
-try:
-    config = Settings()
-except ValidationError as e:
-    print(f"Configuration error: {e}")
-    sys.exit(1)
-```
-
-### Common Validation Errors
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `OPENAI_API_KEY required` | Missing API key | Set in `.env` |
-| `Invalid port number` | Port out of range | Use 1-65535 |
-| `Invalid threshold` | Not 0.0-1.0 | Use valid range |
-
----
-
-**Last Updated:** November 2025
-
+Set a real `GEMINI_API_KEY`, a strong `REDIS_PASSWORD`, and your public `ALLOWED_ORIGINS`. Keep `.env` and `.env.production` out of version control.

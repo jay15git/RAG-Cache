@@ -24,6 +24,7 @@ class RateLimitConfig:
 
     requests_per_minute: int
     tokens_per_minute: int | None = None
+    window_seconds: float = 60.0
 
 
 class RateLimiter:
@@ -66,7 +67,7 @@ class RateLimiter:
 
     def _cleanup_old_requests(self) -> None:
         """Remove requests older than 1 minute."""
-        cutoff = time() - 60
+        cutoff = time() - self._config.window_seconds
         while self._requests and self._requests[0] < cutoff:
             self._requests.popleft()
 
@@ -81,7 +82,7 @@ class RateLimiter:
             return 0.0
         oldest = self._requests[0]
         elapsed = time() - oldest
-        return max(0, 60 - elapsed)
+        return max(0, self._config.window_seconds - elapsed)
 
     def _record_request(self) -> None:
         """Record current request timestamp."""

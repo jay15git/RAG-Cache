@@ -201,9 +201,13 @@ class QueryOptimizer:
         if not self._timing_history:
             return 0.0
 
+        if not 0 <= percentile <= 100:
+            raise ValueError("percentile must be between 0 and 100")
+
         sorted_times = sorted(self._timing_history)
-        idx = int(len(sorted_times) * percentile / 100)
-        return sorted_times[min(idx, len(sorted_times) - 1)]
+        # Use the nearest-rank position over the interval [0, n - 1].
+        idx = int((len(sorted_times) - 1) * percentile / 100)
+        return sorted_times[idx]
 
     def is_meeting_targets(self) -> Dict[str, bool]:
         """

@@ -1,5 +1,5 @@
 #!/bin/bash
-# RAG Cache Rollback Script
+# CachePilot Rollback Script
 # Usage: ./scripts/rollback.sh [backup_timestamp]
 
 set -euo pipefail
@@ -37,15 +37,15 @@ rollback() {
     # Stop services
     log_info "Stopping services..."
     cd "$PROJECT_ROOT"
-    docker-compose down
+    docker compose down
 
     # Restore Redis backup
     if [ -f "$BACKUP_DIR/redis-dump.rdb" ]; then
         log_info "Restoring Redis backup..."
-        docker-compose up -d redis
+        docker compose up -d redis
         sleep 5
         docker cp "$BACKUP_DIR/redis-dump.rdb" ragcache-redis:/data/dump.rdb
-        docker-compose restart redis
+        docker compose restart redis
     fi
 
     # Restore Qdrant backup
@@ -57,13 +57,13 @@ rollback() {
 
     # Start all services
     log_info "Starting services..."
-    docker-compose up -d
+    docker compose up -d
 
     # Health check
     log_info "Waiting for services to be healthy..."
     sleep 10
 
-    if curl -sf http://localhost:8000/health > /dev/null; then
+    if curl -sf http://localhost:8000/ready > /dev/null; then
         log_info "Rollback completed successfully"
     else
         log_error "Services not healthy after rollback"
@@ -83,12 +83,12 @@ rollback_image() {
 
     log_info "Rolling back to image: $PREVIOUS_IMAGE"
 
-    # Update docker-compose to use previous image
+    # Update Docker Compose to use previous image
     cd "$PROJECT_ROOT"
 
     # Restart with previous image
-    docker-compose down
-    docker-compose up -d
+    docker compose down
+    docker compose up -d
 
     log_info "Image rollback completed"
 }
@@ -113,4 +113,3 @@ main() {
 }
 
 main "${1:-}"
-

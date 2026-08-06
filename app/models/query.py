@@ -23,7 +23,7 @@ class QueryRequest(BaseModel):
         examples=["What is the capital of France?"],
     )
 
-    provider: Optional[Literal["openai", "anthropic"]] = Field(
+    provider: Optional[Literal["openai", "anthropic", "gemini"]] = Field(
         None, description="LLM provider to use (defaults to config)"
     )
 

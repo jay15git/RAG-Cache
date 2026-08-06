@@ -223,14 +223,25 @@ class BatchProcessor(Generic[T, R]):
         # Process in chunks
         for i in range(0, len(items), self._config.batch_size):
             chunk = items[i : i + self._config.batch_size]
+            chunk_started = time.time()
 
             try:
                 chunk_results = await asyncio.to_thread(self._process_fn, chunk)
                 results.extend(chunk_results)
+                self._stats["total_items"] += len(chunk)
+                self._stats["successful_items"] += len(chunk_results)
+                self._update_stats(
+                    len(chunk), (time.time() - chunk_started) * 1000
+                )
             except Exception as e:
                 if self._config.continue_on_error:
                     for j in range(len(chunk)):
                         errors.append((i + j, e))
+                    self._stats["total_items"] += len(chunk)
+                    self._stats["failed_items"] += len(chunk)
+                    self._update_stats(
+                        len(chunk), (time.time() - chunk_started) * 1000
+                    )
                 else:
                     raise
 

@@ -1,11 +1,10 @@
-version: '3.8'
-
 services:
   api:
     image: ragcache:latest
-    container_name: ragcache-api
     restart: always
-    env_file: .env.production
+    env_file: ${ENV_FILE:-.env.production}
+    environment:
+      HF_HOME: /tmp/huggingface
     ports:
       - "8000:8000"
     depends_on:
@@ -14,13 +13,15 @@ services:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     networks:
       - ragcache-network
+    volumes:
+      - hf-cache:/tmp/huggingface
     deploy:
       replicas: 2
       resources:
@@ -61,7 +62,7 @@ services:
           memory: 512M
 
   qdrant:
-    image: qdrant/qdrant:v1.6.1
+    image: qdrant/qdrant:v1.15.1
     container_name: ragcache-qdrant
     restart: always
     volumes:
@@ -69,7 +70,7 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -106,6 +107,8 @@ volumes:
     driver: local
   qdrant-data:
     driver: local
+  hf-cache:
+    driver: local
 
 networks:
   ragcache-network:
@@ -113,4 +116,3 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
-

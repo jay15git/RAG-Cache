@@ -42,6 +42,7 @@ htmlcov/
 
 # Environment
 .env
+.env.production
 .env.local
 .env.*.local
 
@@ -86,3 +87,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

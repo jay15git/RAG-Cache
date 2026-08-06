@@ -19,6 +19,7 @@ from openai import APIConnectionError as OpenAIConnectionError
 from openai import APITimeoutError as OpenAITimeoutError
 from openai import InternalServerError as OpenAIInternalServerError
 from openai import RateLimitError as OpenAIRateLimitError
+import httpx
 
 from app.utils.logger import get_logger
 
@@ -119,4 +120,7 @@ class RetryHandler:
             AnthropicTimeoutError,
             AnthropicConnectionError,
             AnthropicInternalServerError,
+            httpx.ConnectError,
+            httpx.ReadTimeout,
+            httpx.HTTPStatusError,
         )

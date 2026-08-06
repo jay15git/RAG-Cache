@@ -1,354 +1,66 @@
-# RAG Cache Performance Tuning Guide
+# CachePilot performance and benchmark methodology
 
-## Table of Contents
+## What the benchmark measures
 
-- [Performance Targets](#performance-targets)
-- [Optimization Strategies](#optimization-strategies)
-- [Cache Optimization](#cache-optimization)
-- [LLM Optimization](#llm-optimization)
-- [Infrastructure Optimization](#infrastructure-optimization)
-- [Monitoring Performance](#monitoring-performance)
-- [Benchmarking](#benchmarking)
+`scripts/load_test.py` is a deterministic simulation of cache behavior. It creates a mixed workload across tenant namespaces, repeats a configurable share of previously cached keys, and applies a configurable delay only to cache misses.
 
-## Performance Targets
+It reports hit rate, P50, P75, P95, P99, estimated tokens avoided, and estimated cost savings.
 
-### Latency Targets
+It does not call Gemini, Redis, Qdrant, or the HTTP API. It must not be described as production end-to-end latency or real provider cost savings.
 
-| Metric | Target | Description |
-|--------|--------|-------------|
-| Cache Hit (Exact) | < 20ms | Redis lookup |
-| Cache Hit (Semantic) | < 50ms | Qdrant similarity search |
-| Cache Miss (LLM) | < 2000ms | Full LLM round-trip |
-| Health Check | < 10ms | Basic health response |
-
-### Throughput Targets
-
-| Metric | Target | Notes |
-|--------|--------|-------|
-| Requests/second | 100+ | Per worker |
-| Concurrent users | 500+ | With connection pooling |
-| Cache hit rate | > 50% | For typical workload |
-
-## Optimization Strategies
-
-### 1. Cache-First Architecture
-
-The cache lookup order matters:
-
-```
-1. Exact Match (Redis) → Fastest, ~5ms
-2. Semantic Match (Qdrant) → Fast, ~30ms
-3. LLM Query → Slowest, ~1000ms
-```
-
-**Optimization**: Maximize cache hits to minimize LLM calls.
-
-### 2. Connection Pooling
+## Reproduce the reference run
 
 ```bash
-# Redis connection pool
-REDIS_POOL_SIZE=20          # Increase for high concurrency
-REDIS_SOCKET_TIMEOUT=5      # Seconds
-
-# Calculate pool size
-# Rule: pool_size = (concurrent_requests / workers) * 2
+docker compose exec -T api python scripts/load_test.py \
+  --requests 2000 \
+  --repeat-ratio 0.6 \
+  --tenants 3 \
+  --miss-latency-ms 25 \
+  --seed 42
 ```
 
-### 3. Async Processing
+Reference output from the local Docker environment:
 
-```python
-# Good: Parallel cache checks
-exact, semantic = await asyncio.gather(
-    redis.get(key),
-    qdrant.search(embedding)
-)
+| Metric | Result |
+|---|---:|
+| Requests | 2,000 |
+| Tenants | 3 |
+| Repeated-request ratio | 0.60 |
+| Hits | 1,229 |
+| Misses | 771 |
+| Hit rate | 61.45% |
+| P50 latency | 0.024 ms |
+| P75 latency | 26.071 ms |
+| P95 latency | 29.618 ms |
+| P99 latency | 30.348 ms |
+| Estimated tokens avoided | 614,500 |
+| Estimated cost avoided | $0.092175 |
 
-# Bad: Sequential checks
-exact = await redis.get(key)
-semantic = await qdrant.search(embedding)
-```
+The small differences in percentile values between runs are normal scheduler variation around the configured 25 ms simulated miss. Hit count and hit rate are reproducible with the same seed.
 
-## Cache Optimization
+## Real component checks
 
-### Semantic Threshold Tuning
-
-| Threshold | Trade-off |
-|-----------|-----------|
-| 0.95 | High precision, low hit rate |
-| 0.90 | Good precision, moderate hit rate |
-| 0.85 | Balanced (recommended) |
-| 0.80 | Higher hit rate, some precision loss |
-| 0.75 | Maximum hit rate, lower precision |
-
-**Recommendation**: Start at 0.85, adjust based on your use case.
+The test suite separately exercises Redis and Qdrant performance behavior with the Docker services:
 
 ```bash
-# Monitor hit rate
-curl http://localhost:8000/api/v1/cache/stats | jq '.hit_rate'
-
-# Adjust threshold
-SEMANTIC_THRESHOLD=0.82
+docker compose exec -T api pytest -q \
+  tests/integration/test_redis_performance.py \
+  tests/benchmarks/test_qdrant_performance.py \
+  --disable-warnings --no-cov
 ```
 
-### TTL Optimization
-
-| Use Case | Recommended TTL |
-|----------|-----------------|
-| Real-time data | 300s (5 min) |
-| General knowledge | 3600s (1 hour) |
-| Static content | 86400s (24 hours) |
-| Reference data | 604800s (1 week) |
+Run a full correctness check before presenting the project:
 
 ```bash
-# Configure TTL
-CACHE_TTL=7200  # 2 hours
+docker compose exec -T api pytest -q tests/unit tests/load --disable-warnings --no-cov
 ```
 
-### Cache Size Optimization
+The latest local unit and load validation completed with `1187 passed, 2 skipped`.
 
-```bash
-# Estimate cache size needed
-# Size = unique_queries_per_hour * TTL_hours
+## Interpreting results
 
-# Example: 1000 queries/hour, 24h TTL
-MAX_CACHE_SIZE=24000
+Use a result sentence such as:
 
-# Monitor cache size
-curl http://localhost:6333/collections/ragcache | jq '.result.points_count'
-```
+> On a deterministic 2,000-request local workload with a 60% repeated-request ratio and a modeled 25 ms miss path, CachePilot achieved a 61.45% cache hit rate and 29.6 ms P95 simulated latency.
 
-### Redis Optimization
-
-```bash
-# Redis configuration
-# redis.conf
-maxmemory 2gb
-maxmemory-policy allkeys-lru
-tcp-backlog 511
-tcp-keepalive 300
-
-# Enable persistence for recovery
-save 900 1
-save 300 10
-save 60 10000
-```
-
-### Qdrant Optimization
-
-```bash
-# Create payload index for faster filtering
-curl -X PUT http://localhost:6333/collections/ragcache/index \
-  -H "Content-Type: application/json" \
-  -d '{
-    "field_name": "query_hash",
-    "field_schema": "keyword"
-  }'
-
-# Optimize collection
-curl -X POST http://localhost:6333/collections/ragcache/optimize
-```
-
-## LLM Optimization
-
-### Model Selection
-
-| Model | Speed | Cost | Quality |
-|-------|-------|------|---------|
-| gpt-3.5-turbo | ⚡⚡⚡ | $ | Good |
-| gpt-4-turbo | ⚡⚡ | $$ | Very Good |
-| gpt-4 | ⚡ | $$$ | Best |
-| claude-3-haiku | ⚡⚡⚡ | $ | Good |
-| claude-3-5-sonnet | ⚡⚡ | $$ | Very Good |
-
-**Recommendation**: Use `gpt-3.5-turbo` for most queries, fallback to GPT-4 for complex ones.
-
-### Token Optimization
-
-```bash
-# Reduce max tokens for faster responses
-DEFAULT_MAX_TOKENS=300
-
-# Lower temperature for more deterministic (faster) responses
-DEFAULT_TEMPERATURE=0.5
-```
-
-### Rate Limiting
-
-```bash
-# Avoid hitting API rate limits
-OPENAI_RATE_LIMIT=50      # Requests per minute
-ANTHROPIC_RATE_LIMIT=40   # Requests per minute
-
-# Implement exponential backoff on errors
-```
-
-## Infrastructure Optimization
-
-### Worker Configuration
-
-```bash
-# Calculate optimal workers
-# Rule: workers = (2 × CPU_cores) + 1
-
-# 4-core machine
-WORKERS=9
-
-# Adjust based on monitoring
-# High CPU: reduce workers
-# Low CPU, slow responses: increase workers
-```
-
-### Memory Configuration
-
-```bash
-# Per-worker memory estimate
-# Base: 200MB + (cache_size × 0.01MB)
-
-# Example: 10000 cache entries
-# Memory = 200 + (10000 × 0.01) = 300MB per worker
-
-# Total with 4 workers: 1.2GB
-```
-
-### Docker Optimization
-
-```yaml
-# docker-compose.yml
-services:
-  api:
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
-```
-
-### Network Optimization
-
-```bash
-# Use internal Docker network
-# Reduce latency between containers
-
-# Keep connections alive
-REDIS_SOCKET_KEEPALIVE=true
-```
-
-## Monitoring Performance
-
-### Key Metrics
-
-```bash
-# Cache performance
-curl http://localhost:8000/api/v1/cache/stats | jq '{
-  hit_rate: .hit_rate,
-  avg_latency: .avg_latency_ms,
-  cache_latency: .avg_cache_latency_ms,
-  llm_latency: .avg_llm_latency_ms
-}'
-```
-
-### Prometheus Queries
-
-```promql
-# Request rate
-rate(ragcache_requests_total[5m])
-
-# Cache hit rate
-ragcache_cache_hit_rate
-
-# Request latency p95
-histogram_quantile(0.95,
-  rate(ragcache_request_duration_seconds_bucket[5m])
-)
-
-# LLM cost rate
-rate(ragcache_llm_cost_total[1h])
-```
-
-### Alert Thresholds
-
-| Metric | Warning | Critical |
-|--------|---------|----------|
-| Cache hit rate | < 30% | < 10% |
-| p95 latency | > 2s | > 5s |
-| Error rate | > 1% | > 5% |
-| Memory usage | > 80% | > 95% |
-
-## Benchmarking
-
-### Load Testing
-
-```bash
-# Using wrk
-wrk -t12 -c400 -d30s http://localhost:8000/health
-
-# Using hey
-hey -n 10000 -c 100 http://localhost:8000/health
-
-# Using ab
-ab -n 10000 -c 100 http://localhost:8000/health
-```
-
-### Query Benchmarking
-
-```bash
-# Benchmark query endpoint
-hey -n 1000 -c 50 -m POST \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is machine learning?"}' \
-  http://localhost:8000/api/v1/query
-```
-
-### Profiling
-
-```python
-# CPU profiling
-import cProfile
-cProfile.run('process_query(request)')
-
-# Memory profiling
-from memory_profiler import profile
-
-@profile
-def process_query(request):
-    # ...
-```
-
-### Performance Regression Tests
-
-```python
-# tests/benchmarks/test_performance.py
-import pytest
-import time
-
-class TestPerformance:
-    def test_cache_hit_under_50ms(self, client):
-        # Warm cache
-        client.post("/api/v1/query", json={"query": "test"})
-
-        # Benchmark cache hit
-        start = time.time()
-        response = client.post("/api/v1/query", json={"query": "test"})
-        duration = (time.time() - start) * 1000
-
-        assert duration < 50, f"Cache hit took {duration}ms"
-```
-
-## Quick Tuning Checklist
-
-- [ ] Set `SEMANTIC_THRESHOLD` to 0.85 (adjust based on hit rate)
-- [ ] Set `CACHE_TTL` appropriate for your data freshness needs
-- [ ] Configure `WORKERS` based on CPU cores
-- [ ] Set `REDIS_POOL_SIZE` for expected concurrency
-- [ ] Use `gpt-3.5-turbo` for faster responses
-- [ ] Enable Redis persistence for cache durability
-- [ ] Create Qdrant indexes for faster queries
-- [ ] Monitor and alert on key metrics
-
----
-
-**Last Updated:** November 2025
-
+Do not convert the simulated estimate into a claim about real Gemini costs or latency without an end-to-end experiment using measured provider responses and an explicit workload dataset.

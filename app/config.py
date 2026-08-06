@@ -25,7 +25,7 @@ class AppConfig(BaseSettings):
     )
 
     # Application settings
-    app_name: str = Field(default="RAGCache", description="Application name")
+    app_name: str = Field(default="CachePilot", description="Application name")
     app_env: Literal["development", "staging", "production"] = Field(
         default="development", description="Environment"
     )
@@ -60,12 +60,13 @@ class AppConfig(BaseSettings):
     # LLM Provider settings
     openai_api_key: str = Field(default="", description="OpenAI API key")
     anthropic_api_key: str = Field(default="", description="Anthropic API key")
+    gemini_api_key: str = Field(default="", description="Google Gemini API key")
 
     # Default LLM settings
-    default_llm_provider: Literal["openai", "anthropic"] = Field(
-        default="openai", description="Default provider"
+    default_llm_provider: Literal["openai", "anthropic", "gemini"] = Field(
+        default="gemini", description="Default provider"
     )
-    default_model: str = Field(default="gpt-3.5-turbo", description="Default model")
+    default_model: str = Field(default="gemini-2.0-flash", description="Default model")
     default_max_tokens: int = Field(default=1000, ge=1, description="Max tokens")
     default_temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Temperature"

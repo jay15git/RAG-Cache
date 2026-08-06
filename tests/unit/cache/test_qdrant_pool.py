@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import pytest_asyncio
 
 from app.cache.qdrant_errors import QdrantConnectionError
 from app.cache.qdrant_pool import (
@@ -147,7 +148,7 @@ class TestQdrantConnectionPool:
         """Create pool config for testing."""
         return PoolConfig(min_size=1, max_size=3, acquire_timeout=5.0)
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def pool(self, pool_config):
         """Create connection pool."""
         pool = QdrantConnectionPool(pool_config)

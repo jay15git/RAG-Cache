@@ -14,6 +14,7 @@ import pytest_asyncio
 from app.cache.redis_cache import RedisCache
 from app.models.cache_entry import CacheEntry
 from app.repositories.redis_repository import RedisRepository, create_redis_pool
+from app.utils.hasher import generate_cache_key
 
 
 @pytest_asyncio.fixture
@@ -43,7 +44,7 @@ def create_test_entries(count: int) -> List[CacheEntry]:
     """Create test cache entries."""
     return [
         CacheEntry(
-            query_hash=f"bench_hash_{i}",
+            query_hash=generate_cache_key(f"Benchmark query {i}"),
             original_query=f"Benchmark query {i}",
             response=f"Benchmark response {i}" * 10,  # Larger response
             provider="openai",
@@ -179,9 +180,11 @@ class TestRedisCachePerformance:
 
         start_time = time.time()
 
-        # Concurrent writes
-        tasks = [redis_cache.set(entry) for entry in entries]
-        results = await asyncio.gather(*tasks)
+        # Bound concurrency to the configured Redis connection pool size.
+        results = []
+        for offset in range(0, len(entries), 50):
+            batch = entries[offset : offset + 50]
+            results.extend(await asyncio.gather(*(redis_cache.set(entry) for entry in batch)))
 
         elapsed = time.time() - start_time
         success_count = sum(1 for r in results if r)
@@ -206,9 +209,11 @@ class TestRedisCachePerformance:
 
         start_time = time.time()
 
-        # Concurrent reads
-        tasks = [redis_cache.get(query) for query in queries]
-        results = await asyncio.gather(*tasks)
+        # Bound concurrency to the configured Redis connection pool size.
+        results = []
+        for offset in range(0, len(queries), 50):
+            batch = queries[offset : offset + 50]
+            results.extend(await asyncio.gather(*(redis_cache.get(query) for query in batch)))
 
         elapsed = time.time() - start_time
         hit_count = sum(1 for r in results if r is not None)

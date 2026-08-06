@@ -20,7 +20,9 @@ from app.api.middleware import (
 )
 from app.api.routes import admin, health, metrics, query
 from app.api.routes.docs import API_DESCRIPTION, TAGS_METADATA
+from app.cache.qdrant_client import create_qdrant_client
 from app.config import config
+from app.monitoring.prometheus import MetricsMiddleware
 from app.repositories.redis_repository import create_redis_pool
 from app.utils.logger import get_logger, setup_logging
 
@@ -42,26 +44,29 @@ class ApplicationState:
 
     async def startup(self) -> None:
         """Initialize application resources."""
-        logger.info("Starting RAGCache", env=config.app_env)
+        logger.info("Starting CachePilot", env=config.app_env)
         try:
             # Initialize Redis connection pool
             self.redis_pool = await create_redis_pool()
             logger.info("Redis pool initialized")
-            # TODO: Initialize Qdrant and embedding model
-            logger.info("RAGCache started successfully")
+            self.qdrant_client = await create_qdrant_client()
+            logger.info("Qdrant client initialized")
+            logger.info("CachePilot started successfully")
         except Exception as e:
-            logger.error("Failed to initialize RAGCache", error=str(e))
+            logger.error("Failed to initialize CachePilot", error=str(e))
             raise
 
     async def shutdown(self) -> None:
         """Cleanup application resources."""
-        logger.info("Shutting down RAGCache")
+        logger.info("Shutting down CachePilot")
         try:
             if self.redis_pool:
                 await self.redis_pool.disconnect()  # type: ignore
                 logger.info("Redis pool closed")
-            # TODO: Cleanup Qdrant and embedding model
-            logger.info("RAGCache shut down successfully")
+            if self.qdrant_client:
+                await self.qdrant_client.close()  # type: ignore
+                logger.info("Qdrant client closed")
+            logger.info("CachePilot shut down successfully")
         except Exception as e:
             logger.error("Error during shutdown", error=str(e))
 
@@ -120,6 +125,9 @@ def create_application() -> FastAPI:
             "X-RateLimit-Reset",
         ],
     )
+
+    # Request count, duration, and percentile latency metrics.
+    app.add_middleware(MetricsMiddleware)
 
     # Note: Rate limiting and auth middleware can be enabled via:
     # from app.api.middleware import RateLimitMiddleware, AuthMiddleware

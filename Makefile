@@ -13,7 +13,7 @@ BLACK := black
 ISORT := isort
 FLAKE8 := flake8
 MYPY := mypy
-DOCKER_COMPOSE := docker-compose
+DOCKER_COMPOSE := docker compose
 APP_DIR := app
 TESTS_DIR := tests
 
@@ -62,7 +62,7 @@ type-check: ## Run mypy type checker
 	$(MYPY) $(APP_DIR)/ --ignore-missing-imports
 
 quality: format-check lint type-check ## Run all code quality checks
-	@echo "$(GREEN)✓ All code quality checks passed!$(NC)"
+	@echo "$(GREEN)All code quality checks passed$(NC)"
 
 ##@ Testing
 
@@ -86,7 +86,7 @@ test-coverage: ## Run tests with coverage report
 		--cov-report=term-missing \
 		--cov-report=html \
 		--cov-fail-under=70
-	@echo "$(GREEN)✓ Coverage report generated in htmlcov/index.html$(NC)"
+	@echo "$(GREEN)Coverage report generated in htmlcov/index.html$(NC)"
 
 test-watch: ## Run tests in watch mode
 	@echo "$(BLUE)Running tests in watch mode...$(NC)"
@@ -100,7 +100,7 @@ security-check: ## Run security checks (safety + bandit)
 	@command -v bandit >/dev/null 2>&1 || (echo "Installing bandit..." && $(PIP) install bandit)
 	safety check --json || true
 	bandit -r $(APP_DIR)/ -f json || true
-	@echo "$(GREEN)✓ Security checks completed$(NC)"
+	@echo "$(GREEN)Security checks completed$(NC)"
 
 ##@ Docker
 
@@ -110,16 +110,16 @@ docker-build: ## Build Docker images
 
 docker-up: ## Start all services in background
 	@echo "$(BLUE)Starting services...$(NC)"
-	$(DOCKER_COMPOSE) up -d
-	@echo "$(GREEN)✓ Services started$(NC)"
+	$(DOCKER_COMPOSE) up --build -d
+	@echo "$(GREEN)Services started$(NC)"
 	@echo "API: http://localhost:8000"
 	@echo "API Docs: http://localhost:8000/docs"
-	@echo "Health: http://localhost:8000/health"
+	@echo "Readiness: http://localhost:8000/ready"
 
 docker-down: ## Stop all services
 	@echo "$(BLUE)Stopping services...$(NC)"
 	$(DOCKER_COMPOSE) down
-	@echo "$(GREEN)✓ Services stopped$(NC)"
+	@echo "$(GREEN)Services stopped$(NC)"
 
 docker-logs: ## Show logs from all services
 	$(DOCKER_COMPOSE) logs -f
@@ -130,7 +130,7 @@ docker-ps: ## Show running containers
 docker-clean: ## Stop and remove all containers, networks, and volumes
 	@echo "$(RED)Cleaning up Docker resources...$(NC)"
 	$(DOCKER_COMPOSE) down -v --remove-orphans
-	@echo "$(GREEN)✓ Docker cleanup complete$(NC)"
+	@echo "$(GREEN)Docker cleanup complete$(NC)"
 
 docker-restart: docker-down docker-up ## Restart all services
 
@@ -141,7 +141,7 @@ run: ## Run the FastAPI application locally
 	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 dev: install-dev docker-up ## Setup development environment
-	@echo "$(GREEN)✓ Development environment ready!$(NC)"
+	@echo "$(GREEN)Development environment ready$(NC)"
 	@echo "Run 'make run' to start the application"
 
 ##@ Cleanup
@@ -156,29 +156,29 @@ clean: ## Clean up Python cache files and build artifacts
 	find . -type d -name 'htmlcov' -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name 'coverage.xml' -delete
 	find . -type f -name '.coverage' -delete
-	@echo "$(GREEN)✓ Cleanup complete$(NC)"
+	@echo "$(GREEN)Cleanup complete$(NC)"
 
 clean-all: clean docker-clean ## Deep clean including Docker resources
-	@echo "$(GREEN)✓ Deep clean complete$(NC)"
+	@echo "$(GREEN)Deep clean complete$(NC)"
 
 ##@ CI/CD
 
 ci-quality: quality ## Run CI quality checks
-	@echo "$(GREEN)✓ CI quality checks passed$(NC)"
+	@echo "$(GREEN)CI quality checks passed$(NC)"
 
 ci-test: test-coverage ## Run CI test suite
-	@echo "$(GREEN)✓ CI tests passed$(NC)"
+	@echo "$(GREEN)CI tests passed$(NC)"
 
 ci: ci-quality ci-test ## Run full CI pipeline locally
-	@echo "$(GREEN)✓ Full CI pipeline passed$(NC)"
+	@echo "$(GREEN)Full CI pipeline passed$(NC)"
 
 ##@ Quick Commands
 
 all: clean install-dev quality test ## Run complete workflow (clean, install, quality, test)
-	@echo "$(GREEN)✓ Complete workflow finished!$(NC)"
+	@echo "$(GREEN)Complete workflow finished$(NC)"
 
 quick: format test-unit ## Quick check (format + unit tests)
-	@echo "$(GREEN)✓ Quick check passed!$(NC)"
+	@echo "$(GREEN)Quick check passed$(NC)"
 
 commit-check: quality test-unit ## Pre-commit checks (run before committing)
-	@echo "$(GREEN)✓ Ready to commit!$(NC)"
+	@echo "$(GREEN)Ready to commit$(NC)"

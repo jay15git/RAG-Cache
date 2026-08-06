@@ -1,5 +1,5 @@
 #!/bin/bash
-# RAG Cache Health Check Script
+# CachePilot Health Check Script
 # Usage: ./scripts/health_check.sh
 
 set -euo pipefail
@@ -12,15 +12,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-check_passed() { echo -e "${GREEN}✓${NC} $1"; }
-check_failed() { echo -e "${RED}✗${NC} $1"; }
-check_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
+check_passed() { echo -e "${GREEN}PASS${NC} $1"; }
+check_failed() { echo -e "${RED}FAIL${NC} $1"; }
+check_warning() { echo -e "${YELLOW}WARN${NC} $1"; }
 
 # Check API health
 check_api() {
     echo "Checking API health..."
 
-    RESPONSE=$(curl -sf "$BASE_URL/health" 2>/dev/null) || {
+    RESPONSE=$(curl -sf "$BASE_URL/ready" 2>/dev/null) || {
         check_failed "API is not responding"
         return 1
     }
@@ -41,8 +41,8 @@ check_api() {
 check_redis() {
     echo "Checking Redis..."
 
-    RESPONSE=$(curl -sf "$BASE_URL/health" 2>/dev/null) || return 1
-    REDIS_STATUS=$(echo "$RESPONSE" | jq -r '.redis // .services.redis // "unknown"' 2>/dev/null)
+    RESPONSE=$(curl -sf "$BASE_URL/ready" 2>/dev/null) || return 1
+    REDIS_STATUS=$(echo "$RESPONSE" | jq -r '.components.redis.status // "unknown"' 2>/dev/null)
 
     if [ "$REDIS_STATUS" == "connected" ] || [ "$REDIS_STATUS" == "healthy" ]; then
         check_passed "Redis is connected"
@@ -56,8 +56,8 @@ check_redis() {
 check_qdrant() {
     echo "Checking Qdrant..."
 
-    RESPONSE=$(curl -sf "$BASE_URL/health" 2>/dev/null) || return 1
-    QDRANT_STATUS=$(echo "$RESPONSE" | jq -r '.qdrant // .services.qdrant // "unknown"' 2>/dev/null)
+    RESPONSE=$(curl -sf "$BASE_URL/ready" 2>/dev/null) || return 1
+    QDRANT_STATUS=$(echo "$RESPONSE" | jq -r '.components.qdrant.status // "unknown"' 2>/dev/null)
 
     if [ "$QDRANT_STATUS" == "connected" ] || [ "$QDRANT_STATUS" == "healthy" ]; then
         check_passed "Qdrant is connected"
@@ -71,23 +71,23 @@ check_qdrant() {
 check_metrics() {
     echo "Checking metrics..."
 
-    if curl -sf "$BASE_URL/metrics" > /dev/null 2>&1; then
+    if curl -sf "$BASE_URL/api/v1/metrics" > /dev/null 2>&1; then
         check_passed "Metrics endpoint is available"
     else
         check_warning "Metrics endpoint not available"
     fi
 }
 
-# Check cache stats
+# Check cache metrics
 check_cache() {
-    echo "Checking cache..."
+    echo "Checking cache metrics..."
 
-    RESPONSE=$(curl -sf "$BASE_URL/api/v1/cache/stats" 2>/dev/null) || {
-        check_warning "Cache stats not available"
+    RESPONSE=$(curl -sf "$BASE_URL/api/v1/metrics" 2>/dev/null) || {
+        check_warning "Cache metrics not available"
         return 0
     }
 
-    HIT_RATE=$(echo "$RESPONSE" | jq -r '.hit_rate // 0' 2>/dev/null)
+    HIT_RATE=$(echo "$RESPONSE" | jq -r '.pipeline.cache_hit_rate // 0' 2>/dev/null)
 
     if (( $(echo "$HIT_RATE > 0.3" | bc -l 2>/dev/null || echo "0") )); then
         check_passed "Cache hit rate: ${HIT_RATE}%"
@@ -101,7 +101,7 @@ check_cache() {
 # Main health check
 main() {
     echo "================================"
-    echo "RAG Cache Health Check"
+    echo "CachePilot Health Check"
     echo "================================"
     echo ""
 
@@ -126,4 +126,3 @@ main() {
 }
 
 main
-

@@ -1,395 +1,155 @@
 # CachePilot
 
-A multi-tenant semantic caching layer for LLM APIs. CachePilot combines Redis exact matching with Qdrant semantic matching to reduce redundant model calls while keeping cache identity, freshness, and privacy explicit.
+CachePilot is a containerized semantic caching service for LLM requests. It checks Redis for an exact cache entry, checks Qdrant for a semantically similar entry, and calls the configured LLM only on a miss.
 
-## Resume-ready engineering signals
+The default provider is Google Gemini. Semantic embeddings use `sentence-transformers/all-MiniLM-L6-v2` locally on CPU. NVIDIA drivers and CUDA are not required.
 
-- Tenant-isolated namespaces prevent cross-customer cache leakage.
-- Adaptive query policies tune similarity threshold, TTL, and stale serving by query type.
-- Tenant-scoped invalidation supports tags and prefixes.
-- Privacy-safe audit helpers redact common PII and secrets.
-- Metrics expose hit rate, latency, near misses, false hits, stale hits, and estimated savings.
-- Reproducible benchmark produces measured before/after evidence.
+## What it does
 
-Run the local benchmark:
+- Redis exact cache and Qdrant semantic cache
+- Tenant-scoped cache namespaces
+- Cache identity that includes tenant, system-prompt hash, model, and temperature
+- Query-aware cache policies for stable, time-sensitive, classification, and creative requests
+- TTL and opt-in stale response handling
+- Tenant cache invalidation by tag or query prefix
+- Gemini, OpenAI, and Anthropic provider implementations
+- Prometheus-compatible metrics for hits, misses, near misses, stale hits, false hits, latency, and estimated savings
+- PII-redacted, bounded audit trail
+- Docker Compose development environment and production Compose template
+- Deterministic, dependency-free load benchmark
+
+## Architecture
+
+```mermaid
+flowchart LR
+    C[Client] --> API[FastAPI: POST /api/v1/query]
+    API --> S[QueryService]
+    S --> R{Exact cache\nRedis}
+    R -- hit --> O[Cached response]
+    R -- miss --> Q{Semantic cache\nCPU embedding plus Qdrant}
+    Q -- hit above policy threshold --> O
+    Q -- miss --> L[Configured LLM provider]
+    L --> W[Write Redis and Qdrant]
+    W --> O
+```
+
+Exact matching is attempted before semantic matching. Semantic entries are filtered by tenant namespace. Cache policy is derived from the request text and temperature:
+
+| Request type | Similarity threshold | TTL behavior | Stale responses |
+|---|---:|---|---|
+| Stable | configured default, `0.85` by default | configured default, `3600` seconds by default | 900-second opt-in window |
+| Time-sensitive | `0.94` | maximum 300 seconds | disabled |
+| Classification | `0.80` | configured default | 300-second opt-in window |
+| Creative or temperature `>= 1.0` | `0.97` | maximum 900 seconds | disabled |
+
+## Quick start
+
+Prerequisites: Docker Desktop with Compose and a Gemini API key from Google AI Studio.
 
 ```bash
-python scripts/load_test.py --requests 2000 --repeat-ratio 0.6 --tenants 3 --output benchmark.json
-```
-
-See [the CachePilot case study](docs/CACHEPILOT_CASE_STUDY.md) for architecture and measurement methodology.
-
-## 🎯 What is RAG Cache?
-
-RAG Cache sits between your application and LLM providers (OpenAI, Anthropic) to:
-
-- **💰 Save Money** - Avoid paying for duplicate queries
-- **⚡ Reduce Latency** - Return cached responses in ~2ms instead of ~10 seconds
-- **🛡️ Increase Reliability** - Reduce dependency on external APIs
-
-### How It Works
-
-```
-User Query → Exact Match (Redis) → Semantic Match (Qdrant) → LLM (if needed)
-                   ↓                       ↓                      ↓
-              ~1ms hit              ~450ms hit              ~8,500ms
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Docker & Docker Compose
-- OpenAI API key
-
-### Installation
-
-```bash
-# Clone the repository
-git clone <your-repo>
-cd "Rag cache"
-
-# Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
+git clone https://github.com/jay15git/RAG-Cache.git
+cd RAG-Cache
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
-
-# Start Redis & Qdrant
-docker-compose up -d redis qdrant
-
-# Run the application
-uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Verify Installation
+Set `GEMINI_API_KEY` in `.env`. Keep `DEFAULT_LLM_PROVIDER=gemini` and `DEFAULT_MODEL=gemini-2.0-flash` unless you intend to configure another provider.
 
 ```bash
-# Health check
-curl http://localhost:8000/health
+docker compose up --build -d
+curl http://localhost:8000/ready
+open http://localhost:8000/docs
 ```
 
-Expected response:
-```json
-{
-  "status": "healthy",
-  "environment": "development",
-  "version": "0.1.0"
-}
+The first semantic request downloads the CPU embedding model into the Docker volume. This is a one-time download for that volume and can take several minutes depending on the network.
+
+Stop the local stack with:
+
+```bash
+docker compose down
 ```
 
-## 📡 API Usage
+`docker compose down -v` also deletes local Redis, Qdrant, and embedding-model volumes.
 
-### Query Endpoint
+## Make a request
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{
-    "query": "What is machine learning?",
-    "use_cache": true
+    "query": "Explain semantic caching in two sentences.",
+    "tenant_id": "demo",
+    "tags": ["documentation"],
+    "use_cache": true,
+    "use_semantic_cache": true,
+    "system_prompt_hash": "support-v1",
+    "temperature": 0.2
   }'
 ```
 
-**First Request (Cache Miss):**
-```json
-{
-  "response": "Machine learning is a subset of AI...",
-  "provider": "openai",
-  "model": "gpt-4o-mini-2024-07-18",
-  "usage": {
-    "prompt_tokens": 12,
-    "completion_tokens": 418,
-    "total_tokens": 430
-  },
-  "cache_info": {
-    "cache_hit": false,
-    "cache_type": null
-  },
-  "latency_ms": 10090.93
-}
-```
+The first request is a miss and populates both caches. Repeating the same request should return `cache_info.cache_type: "exact"`. A similar request can return `"semantic"` when it clears the applicable policy threshold.
 
-**Second Request (Exact Cache Hit - Redis):**
-```json
-{
-  "response": "Machine learning is a subset of AI...",
-  "cache_info": {
-    "cache_hit": true,
-    "cache_type": "exact"
-  },
-  "latency_ms": 1.11
-}
-```
+## API surface
 
-**Similar Query (Semantic Cache Hit - Qdrant):**
-```bash
-curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Can you explain machine learning?", "use_cache": true}'
-```
-```json
-{
-  "response": "Machine learning is a subset of AI...",
-  "cache_info": {
-    "cache_hit": true,
-    "cache_type": "semantic",
-    "similarity_score": 0.8563
-  },
-  "latency_ms": 457.89
-}
-```
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness response |
+| `GET` | `/ready` | Redis, Qdrant, and configured-provider readiness |
+| `GET` | `/docs` | Interactive OpenAPI documentation |
+| `POST` | `/api/v1/query` | Process one LLM request through the cache |
+| `GET` | `/api/v1/metrics` | JSON operational metrics |
+| `GET` | `/api/v1/metrics/prometheus` | Prometheus exposition format |
+| `DELETE` | `/api/v1/admin/cache/{tenant_id}` | Invalidate a tenant, optionally by `tag` or `prefix` |
 
-### Other Endpoints
+See [API.md](docs/API.md) for request and response schemas.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/docs` | GET | Swagger UI documentation |
-| `/api/v1/query` | POST | Process query with caching |
-| `/api/v1/metrics` | GET | Application metrics |
-| `/api/v1/metrics/prometheus` | GET | Prometheus format metrics |
+## Benchmark
 
-## 📊 Real Performance Tests
-
-Tests performed on November 27, 2025:
-
-### Cache Hit Performance
-
-| Test | Cache Type | Latency | Speedup |
-|------|------------|---------|---------|
-| First Query (Cache Miss) | LLM Call | 8,573ms | baseline |
-| Same Query (Exact Match) | **Redis** | 1.11ms | **7,723x faster** |
-| Similar Query (Semantic Match) | **Qdrant** | 457ms | **18.7x faster** |
-| Different Query (Cache Miss) | LLM Call | 8,154ms | - |
-
-### Semantic Cache Example
+Run the deterministic benchmark inside the API container:
 
 ```bash
-# Original cached query
-"What is deep learning?"
-
-# Similar query (semantic match)
-"Can you explain deep learning to me?"
-# → Similarity Score: 0.856
-# → Latency: 457ms (instead of ~8,500ms)
-# → Saved: 811 tokens
+docker compose exec -T api python scripts/load_test.py \
+  --requests 2000 \
+  --repeat-ratio 0.6 \
+  --tenants 3 \
+  --miss-latency-ms 25 \
+  --seed 42
 ```
 
-### Cache Types Explained
+Current local reference run:
 
-| Cache | Storage | Latency | Use Case |
-|-------|---------|---------|----------|
-| **Exact** | Redis | ~1ms | Identical queries |
-| **Semantic** | Qdrant | ~450ms | Similar questions |
-| **Miss** | LLM API | ~8,500ms | New unique queries |
+| Metric | Result |
+|---|---:|
+| Requests | 2,000 |
+| Cache hit rate | 61.45% |
+| P50 | 0.024 ms |
+| P75 | 26.071 ms |
+| P95 | 29.618 ms |
+| P99 | 30.348 ms |
+| Estimated tokens avoided | 614,500 |
 
-## 📈 Metrics
+This benchmark intentionally models a 25 ms miss and an in-memory near-zero hit. It is useful for regression checks and comparing cache behavior. It is not a production Gemini latency or cost measurement.
+
+## Verification
 
 ```bash
-curl http://localhost:8000/api/v1/metrics
+docker compose exec -T api pytest -q tests/unit tests/load --disable-warnings --no-cov
+docker compose exec -T api python scripts/load_test.py --requests 2000 --repeat-ratio 0.6 --tenants 3
+curl http://localhost:8000/ready
 ```
 
-```json
-{
-  "application": {
-    "name": "RAGCache",
-    "environment": "development",
-    "version": "0.1.0"
-  },
-  "pipeline": {
-    "total_requests": 0,
-    "cache_hits": 0,
-    "cache_hit_rate": 0.0,
-    "avg_latency_ms": 0.0
-  },
-  "cache": {
-    "total_keys": 286,
-    "memory_used_bytes": 1585248,
-    "hits": 2,
-    "misses": 2032,
-    "hit_rate": 0.1
-  },
-  "config": {
-    "semantic_cache_enabled": true,
-    "exact_cache_enabled": true,
-    "similarity_threshold": 0.85,
-    "cache_ttl_seconds": 3600
-  }
-}
-```
+Latest local verification: `1187 passed, 2 skipped` for unit and load tests.
 
-### Prometheus Metrics
+## Configuration and deployment
 
-```bash
-curl http://localhost:8000/api/v1/metrics/prometheus
-```
-
-```
-# HELP ragcache_info Application information
-# TYPE ragcache_info gauge
-ragcache_info{version="0.1.0",environment="development"} 1
-
-# HELP ragcache_requests_total Total requests processed
-# TYPE ragcache_requests_total counter
-ragcache_requests_total 0
-
-# HELP ragcache_cache_hits_total Total cache hits
-# TYPE ragcache_cache_hits_total counter
-ragcache_cache_hits_total 0
-
-# HELP ragcache_redis_keys Total Redis keys
-# TYPE ragcache_redis_keys gauge
-ragcache_redis_keys 283
-```
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Your Application                              │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │ HTTP
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      RAG Cache (FastAPI)                         │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Query Service                          │   │
-│  │  1. Check Redis (exact match)                             │   │
-│  │  2. Check Qdrant (semantic match)                         │   │
-│  │  3. Call LLM if no cache hit                              │   │
-│  │  4. Store response in cache                               │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ┌────────────┐  ┌────────────┐  ┌──────────────────────────┐   │
-│  │   Redis    │  │   Qdrant   │  │    LLM Providers         │   │
-│  │  (Exact)   │  │ (Semantic) │  │  OpenAI / Anthropic      │   │
-│  └────────────┘  └────────────┘  └──────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENAI_API_KEY` | - | OpenAI API key (required) |
-| `ANTHROPIC_API_KEY` | - | Anthropic API key (optional) |
-| `REDIS_HOST` | `localhost` | Redis host |
-| `QDRANT_HOST` | `localhost` | Qdrant host |
-| `SEMANTIC_SIMILARITY_THRESHOLD` | `0.85` | Similarity threshold (0.0-1.0) |
-| `CACHE_TTL_SECONDS` | `3600` | Cache TTL in seconds |
-| `DEFAULT_MODEL` | `gpt-3.5-turbo` | Default LLM model |
-
-## 📁 Project Structure
-
-```
-app/
-├── api/              # FastAPI routes & middleware
-│   ├── routes/       # API endpoints
-│   └── middleware/   # Auth, rate limiting, logging
-├── cache/            # Redis & Qdrant clients
-├── llm/              # LLM provider integrations
-│   ├── openai_provider.py
-│   └── anthropic_provider.py
-├── embeddings/       # Text embedding generation
-├── pipeline/         # Query processing pipeline
-├── monitoring/       # Prometheus metrics & alerts
-├── optimization/     # Performance optimization
-├── models/           # Pydantic data models
-├── services/         # Business logic
-└── utils/            # Utilities (logger, hasher)
-```
-
-## 🧪 Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=app
-
-# Run specific test file
-pytest tests/unit/test_config.py -v
-```
-
-## 🐳 Docker
-
-### Start Services
-
-```bash
-# Start all services
-docker-compose up -d
-
-# Start only Redis and Qdrant
-docker-compose up -d redis qdrant
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-```
-
-### Production Deployment
-
-```bash
-# Use production compose file
-docker-compose -f docker-compose.prod.yml up -d
-
-# Or use deployment script
-./scripts/deploy.sh production
-```
-
-## 💰 Cost Savings Example
-
-| Scenario | Without Cache | With Cache (50% hit rate) |
-|----------|---------------|---------------------------|
-| 10,000 queries/day | ~$50/day | ~$25/day |
-| Average latency | ~10,000ms | ~5,000ms |
-| P95 latency | ~15,000ms | ~2ms (cache hit) |
-
-## 📚 Documentation
-
-- [API Documentation](docs/API.md)
+- [Configuration](docs/CONFIGURATION.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Configuration Guide](docs/CONFIGURATION.md)
-- [Testing Guide](docs/TESTING.md)
+- [API reference](docs/API.md)
+- [Development](docs/DEVELOPMENT.md)
+- [Testing](docs/TESTING.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Performance and benchmark methodology](docs/PERFORMANCE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Security Best Practices](docs/SECURITY.md)
-- [Performance Tuning](docs/PERFORMANCE.md)
 
-## 🛠️ Tech Stack
+## Current scope
 
-| Component | Technology |
-|-----------|------------|
-| Language | Python 3.11 |
-| Framework | FastAPI |
-| Exact Cache | Redis 7.2 |
-| Semantic Cache | Qdrant 1.6 |
-| LLM Providers | OpenAI, Anthropic |
-| Embeddings | sentence-transformers |
-| Testing | pytest |
-| Containerization | Docker |
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
-
-## 📄 License
-
-MIT License - See [LICENSE](LICENSE) file.
-
----
-
-**Built with ❤️**
+CachePilot exposes its own `/api/v1/query` schema. It is not yet an OpenAI-compatible `/v1/chat/completions` proxy and does not implement streaming responses. The provider selected for a request is controlled by `DEFAULT_LLM_PROVIDER`; the optional request `provider` field is accepted by the schema but is not currently used for per-request routing.

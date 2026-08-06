@@ -10,7 +10,14 @@ Sandi Metz Principles:
 from typing import Any, Dict, List, Optional, Union
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, Filter, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 from app.cache.qdrant_errors import ErrorContext, handle_qdrant_error
 from app.cache.qdrant_retry import RetryPolicy, retry_on_error
@@ -287,46 +294,35 @@ class QdrantRepository:
             List of SearchResult objects
         """
         try:
-            # Use HTTP search for compatibility with older Qdrant versions
-            import httpx
-
-            payload: Dict[str, Any] = {
-                "vector": query_vector,
-                "limit": limit,
-                "with_payload": True,
-                "with_vector": False,
-            }
-
-            if score_threshold is not None:
-                payload["score_threshold"] = score_threshold
-
-            if filter_condition is not None:
-                payload["filter"] = filter_condition.model_dump()
+            query_filter = filter_condition
             if namespace:
-                namespace_clause = {"key": "namespace", "match": {"value": namespace}}
-                if payload.get("filter"):
-                    payload["filter"].setdefault("must", []).append(namespace_clause)
-                else:
-                    payload["filter"] = {"must": [namespace_clause]}
-
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"http://{config.qdrant_host}:{config.qdrant_port}"
-                    f"/collections/{self._collection_name}/points/search",
-                    json=payload,
-                    timeout=30.0,
+                namespace_clause = FieldCondition(
+                    key="namespace", match=MatchValue(value=namespace)
                 )
-                response.raise_for_status()
-                data = response.json()
+                if query_filter is None:
+                    query_filter = Filter(must=[namespace_clause])
+                else:
+                    query_filter = Filter(
+                        must=[*(query_filter.must or []), namespace_clause]
+                    )
 
+            results = await self._client.search(
+                collection_name=self._collection_name,
+                query_vector=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+                score_threshold=score_threshold,
+            )
             search_results = [
                 SearchResult(
-                    point_id=str(result["id"]),
-                    score=result["score"],
+                    point_id=str(result.id),
+                    score=result.score,
                     vector=None,
-                    payload=result.get("payload", {}),
+                    payload=result.payload or {},
                 )
-                for result in data.get("result", [])
+                for result in results
             ]
 
             logger.info(
@@ -359,37 +355,23 @@ class QdrantRepository:
             List of SearchResult objects with vectors
         """
         try:
-            # Use HTTP search for compatibility with older Qdrant versions
-            import httpx
-
-            payload: Dict[str, Any] = {
-                "vector": query_vector,
-                "limit": limit,
-                "with_payload": True,
-                "with_vector": True,
-            }
-
-            if score_threshold is not None:
-                payload["score_threshold"] = score_threshold
-
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"http://{config.qdrant_host}:{config.qdrant_port}"
-                    f"/collections/{self._collection_name}/points/search",
-                    json=payload,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                data = response.json()
+            results = await self._client.search(
+                collection_name=self._collection_name,
+                query_vector=query_vector,
+                limit=limit,
+                with_payload=True,
+                with_vectors=True,
+                score_threshold=score_threshold,
+            )
 
             search_results = [
                 SearchResult(
-                    point_id=str(result["id"]),
-                    score=result["score"],
-                    vector=result.get("vector"),
-                    payload=result.get("payload", {}),
+                    point_id=str(result.id),
+                    score=result.score,
+                    vector=result.vector,
+                    payload=result.payload or {},
                 )
-                for result in data.get("result", [])
+                for result in results
             ]
 
             logger.info(

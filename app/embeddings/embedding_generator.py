@@ -8,6 +8,7 @@ Sandi Metz Principles:
 """
 from typing import List
 
+from huggingface_hub import snapshot_download
 from sentence_transformers import SentenceTransformer
 
 from app.config import config
@@ -33,7 +34,28 @@ class EmbeddingGenerator:
         """
         self.model_name = model_name or config.embedding_model
         try:
-            self._model = SentenceTransformer(self.model_name)
+            model_path = snapshot_download(
+                repo_id=self.model_name,
+                cache_dir=None,
+                allow_patterns=[
+                    "config.json",
+                    "config_sentence_transformers.json",
+                    "modules.json",
+                    "README.md",
+                    "sentence_bert_config.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json",
+                    "vocab.txt",
+                    "1_Pooling/config.json",
+                    "0_Transformer/config.json",
+                    "0_Transformer/model.safetensors",
+                    "0_Transformer/pytorch_model.bin",
+                    "model.safetensors",
+                    "pytorch_model.bin",
+                ],
+            )
+            self._model = SentenceTransformer(model_path, device=config.embedding_device)
         except Exception as e:
             logger.error("Failed to load embedding model", error=str(e))
             raise EmbeddingError(f"Failed to load model {self.model_name}: {str(e)}")

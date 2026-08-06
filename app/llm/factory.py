@@ -10,6 +10,7 @@ Sandi Metz Principles:
 from app.config import config
 from app.exceptions import ConfigurationError
 from app.llm.anthropic_provider import AnthropicProvider
+from app.llm.gemini_provider import GeminiProvider
 from app.llm.openai_provider import OpenAIProvider
 from app.llm.provider import BaseLLMProvider
 from app.utils.logger import get_logger
@@ -68,6 +69,7 @@ class LLMProviderFactory:
         creators = {
             "openai": LLMProviderFactory._create_openai,
             "anthropic": LLMProviderFactory._create_anthropic,
+            "gemini": LLMProviderFactory._create_gemini,
         }
 
         creator = creators.get(provider_name.lower())
@@ -113,3 +115,10 @@ class LLMProviderFactory:
             raise ConfigurationError("Anthropic API key not configured")
 
         return AnthropicProvider(api_key=api_key)
+
+    @staticmethod
+    def _create_gemini() -> GeminiProvider:
+        """Create Gemini provider."""
+        if not config.gemini_api_key:
+            raise ConfigurationError("Gemini API key not configured")
+        return GeminiProvider(api_key=config.gemini_api_key)
